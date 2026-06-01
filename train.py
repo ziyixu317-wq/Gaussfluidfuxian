@@ -121,7 +121,6 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
     # Setup iterators
     train_cameras = scene.getTrainCameras()
-    t0_cameras = scene.getT0Cameras()
 
     # Learning rate schedulers
     bg_color = scene.background
@@ -149,21 +148,13 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         lambda_weights = get_dynamic_lambda_weights(iteration, opt, phase)
 
         # --------------------------------------------------------------
-        # Phase-specific sampling & MLP control
-        # Paper Sec 4.1.2: Phase 1 = canonical frame (3DGS procedure, no deformation)
-        # Phase 2 = dynamics (MLP unfrozen, all timesteps)
+        # Phase-specific: weight schedule differs per phase (Sec 4.1.2).
+        # ALL phases use all timesteps with MLP trainable — like 4DGS
+        # coarse→fine, the "canonical frame" emphasis comes from loss
+        # weights (λ_a=10%, λ_v=10%), not from data filtering.
+        # Without all views, 28 t=0 frames are insufficient for 3D recon.
         # --------------------------------------------------------------
-        if phase == "phase1":
-            # Phase 1: t=0 only, MLP frozen (paper: "follows official 3DGS procedure")
-            gaussians.freeze_mlp()
-            if len(t0_cameras) == 0:
-                raise RuntimeError("No t=0 cameras available for Phase 1!")
-            viewpoint_cam = t0_cameras[iteration % len(t0_cameras)]
-        else:
-            # Phase 2/3: all timesteps, MLP trainable
-            if phase == "phase2":
-                gaussians.unfreeze_mlp()  # idempotent; paper: Phase 2 = dynamics
-            viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
+        viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
 
         # --------------------------------------------------------------
         # Forward pass: render with spatio-temporal deformation
@@ -190,24 +181,20 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
             lambda_weights['lambda_ssim'] * (1.0 - ssim_loss_val)
 
         # --------------------------------------------------------------
-        # Physics-based losses (on DEFORMED + ACTIVATED state)
-        # Paper: λ_a,λ_v,λ_d schedule in Sec 4.1.2 applies to deformed
-        # state s_t = s_0 + Δs. In Phase 1 MLP is frozen (Δs=0), so
-        # physics on canonical s_0 is redundant with visual loss. Skip.
+        # Physics-based losses (on DEFORMED + ACTIVATED state).
+        # MLP always trainable → deformed state always meaningful.
+        # Weights (λ) from dynamic schedule control per-phase magnitude.
         # --------------------------------------------------------------
-        if phase != "phase1":
-            physics_losses = gaussians.compute_physics_losses(
-                p_t=render_pkg["deformed_xyz"],
-                scales_activated=render_pkg["scales_activated"],
-                opacities_activated=render_pkg["opacities_activated"],
-                shs=render_pkg["shs"],
-                iteration=iteration,
-                lambda_weights=lambda_weights,
-            )
-            for loss_name, loss_val in physics_losses.items():
-                loss += loss_val
-        else:
-            physics_losses = {}
+        physics_losses = gaussians.compute_physics_losses(
+            p_t=render_pkg["deformed_xyz"],
+            scales_activated=render_pkg["scales_activated"],
+            opacities_activated=render_pkg["opacities_activated"],
+            shs=render_pkg["shs"],
+            iteration=iteration,
+            lambda_weights=lambda_weights,
+        )
+        for loss_name, loss_val in physics_losses.items():
+            loss += loss_val
 
         loss.backward()
 
