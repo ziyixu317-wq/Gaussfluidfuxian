@@ -148,7 +148,7 @@ class GaussianFluidParticles(nn.Module):
         rots[:, 0] = 1  # identity quaternion
 
         # Opacity initialized to 0.1 (inverse sigmoid)
-        opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1),
+        opacities = inverse_sigmoid(0.5 * torch.ones((fused_point_cloud.shape[0], 1),
                                                       dtype=torch.float, device="cuda"))
 
         # Transform features initialized to zero (identity mapping at t=0)
@@ -452,7 +452,7 @@ class GaussianFluidParticles(nn.Module):
     def reset_opacity(self):
         """Reset opacity of all Gaussians to a lower value."""
         opacities_new = inverse_sigmoid(
-            torch.min(self.opacity_activation(self._opacity), torch.ones_like(self._opacity) * 0.01)
+            torch.min(self.opacity_activation(self._opacity), torch.ones_like(self._opacity) * 0.05)
         )
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]

@@ -84,24 +84,26 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
         R = w2c[:3, :3].T  # R is stored transposed in 3DGS
         T = w2c[:3, 3]
 
-        # Handle image loading
-        im_data = np.array(image.convert("RGBA"))
-        bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
+        # Handle image loading: keep alpha as foreground mask
+        im_data = np.array(image.convert("RGBA")) / 255.0
+        alpha = im_data[:, :, 3]  # foreground mask: 1=fluid, 0=background
+        bg = np.array([1.0, 1.0, 1.0]) if white_background else np.array([0.0, 0.0, 0.0])
 
-        norm_data = im_data / 255.0
-        arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
+        # Composite onto background
+        arr = im_data[:, :, :3] * im_data[:, :, 3:4] + bg * (1 - im_data[:, :, 3:4])
         image_tensor = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
-        # Resize if needed (ensure dimensions match across dataset)
-        width, height = image_tensor.size
+        # Also create alpha mask as a PIL image for Camera
+        alpha_mask = Image.fromarray((alpha * 255.0).astype(np.uint8), "L")
 
+        width, height = image_tensor.size
         fovy = _focal2fov(_fov2focal(fovx, width), height)
 
         cam_infos.append(CameraInfo(
             uid=idx, R=R, T=T, FovY=fovy, FovX=fovx,
             image=image_tensor, image_path=cam_name,
             image_name=image_name, width=width, height=height,
-            time=time, mask=None
+            time=time, mask=alpha_mask
         ))
 
     return cam_infos
@@ -153,6 +155,12 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args):
         image_tensor = torch.from_numpy(np.array(c.image)) / 255.0
         image_tensor = image_tensor.permute(2, 0, 1)
 
+        # Convert alpha mask to tensor
+        if c.mask is not None:
+            alpha_tensor = torch.from_numpy(np.array(c.mask)).float() / 255.0
+        else:
+            alpha_tensor = None
+
         if resolution_scale != 1.0:
             import torch.nn.functional as F
             new_h = int(c.height * resolution_scale)
@@ -160,12 +168,17 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args):
             image_tensor = F.interpolate(
                 image_tensor.unsqueeze(0), size=(new_h, new_w), mode='bilinear'
             ).squeeze(0)
+            if alpha_tensor is not None:
+                alpha_tensor = F.interpolate(
+                    alpha_tensor.unsqueeze(0).unsqueeze(0),
+                    size=(new_h, new_w), mode='nearest'
+                ).squeeze()
 
         camera_list.append(Camera(
             colmap_id=c.uid, R=c.R, T=c.T,
             FoVx=c.FovX, FoVy=c.FovY,
             image=image_tensor,
-            gt_alpha_mask=None,
+            gt_alpha_mask=alpha_tensor,
             image_name=c.image_name,
             uid=c.uid,
             time=c.time,

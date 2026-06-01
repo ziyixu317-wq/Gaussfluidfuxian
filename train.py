@@ -190,13 +190,24 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         )
 
         # --------------------------------------------------------------
-        # Visual losses
+        # Visual losses (foreground-weighted via alpha mask)
         # --------------------------------------------------------------
-        gt_image = viewpoint_cam.gt_image.cuda()[:3, :, :]
-        Ll1 = l1_loss(image, gt_image)
+        gt_rgb = viewpoint_cam.gt_image.cuda()[:3, :, :]
+        gt_full = viewpoint_cam.gt_image.cuda()
 
-        # SSIM loss
-        ssim_loss_val = ssim(image.unsqueeze(0), gt_image.unsqueeze(0))
+        # Extract alpha mask if available (4th channel)
+        if gt_full.shape[0] > 3:
+            alpha = gt_full[3:4, :, :]  # (1, H, W), 1=foreground, 0=background
+        else:
+            alpha = torch.ones_like(gt_rgb[:1])
+
+        # Weight: foreground 10x stronger than background
+        pixel_weight = alpha * 0.9 + 0.1  # fg=1.0, bg=0.1
+        weighted_l1 = (torch.abs(image - gt_rgb) * pixel_weight).mean()
+        Ll1 = weighted_l1
+
+        # SSIM on full image (structurally important even with mostly background)
+        ssim_loss_val = ssim(image.unsqueeze(0), gt_rgb.unsqueeze(0))
 
         loss = lambda_weights['lambda_rgb'] * Ll1 + \
             lambda_weights['lambda_ssim'] * (1.0 - ssim_loss_val)
