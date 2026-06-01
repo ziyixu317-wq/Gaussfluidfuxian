@@ -63,27 +63,26 @@ def ssim(img1, img2, window_size=11, size_average=True):
 
 def density_loss(densities):
     """
-    Equation (5): L_dens = (1/N) Σ(ρ̄/ρ_i − 1)²
+    Equation (5): L_dens = (1/N) Σ(D_i/D̄ − 1)²
     Args:
-        densities: (N,) tensor of SPH density estimates
+        densities: (N,) tensor of SPH density estimates D_i
     """
-    rho_bar = densities.mean()
-    # Clamp ratio to prevent NaN from extreme density values
-    ratio = rho_bar / (densities + 1e-10)
+    D_bar = densities.mean()
+    ratio = densities / (D_bar + 1e-10)  # D_i / D̄
     ratio = torch.clamp(ratio, min=0.01, max=100.0)
     return ((ratio - 1) ** 2).mean()
 
 
 def volume_loss(scales_activated):
     """
-    Equation (7): L_vol = (1/N) Σ(V̄/V_i − 1)²
+    Equation (7): L_vol = (1/N) Σ(V_i/V̄ − 1)²
     Args:
         scales_activated: (N, 3) tensor of exp-activated scales (s_x, s_y, s_z)
     """
     V_i = scales_activated[:, 0] * scales_activated[:, 1] * scales_activated[:, 2]
     V_i = torch.clamp(V_i, min=1e-10, max=1e10)
     V_bar = V_i.mean()
-    ratio = V_bar / (V_i + 1e-10)
+    ratio = V_i / (V_bar + 1e-10)  # V_i / V̄
     ratio = torch.clamp(ratio, min=0.01, max=100.0)
     return ((ratio - 1) ** 2).mean()
 

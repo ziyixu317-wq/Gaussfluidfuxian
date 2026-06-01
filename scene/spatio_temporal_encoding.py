@@ -120,7 +120,7 @@ class SpatioTemporalEncoder(nn.Module):
 
         # Split output into Δp, Δs, Δr
         delta_p = output[:, 0:3]    # (N, 3)
-        delta_s = output[:, 3:6]    # (N, 3)
+        delta_s = torch.tanh(output[:, 3:6]) * 10.0  # clamped to [-10,10], prevents exp overflow
         delta_r = output[:, 6:10]   # (N, 4)
 
         return delta_p, delta_s, delta_r

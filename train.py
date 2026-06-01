@@ -48,42 +48,41 @@ def get_dynamic_lambda_weights(iteration, args_training, phase="phase1"):
         'lambda_rgb': args_training.lambda_rgb,
         'lambda_ssim': args_training.lambda_ssim,
         'lambda_op': args_training.lambda_op,
-        'lambda_light': args_training.lambda_light,  # always full value per paper
     }
 
     if phase == "phase1":
         # Phase 1: lambda_d=0, lambda_a=10%, lambda_v=10% (paper explicitly states)
+        # Also reduce lambda_light=10%: at 1.0 full weight it dominates, flattening colors
         weights['lambda_dens'] = 0.0
         weights['lambda_aniso'] = args_training.lambda_aniso * 0.1
         weights['lambda_vol'] = args_training.lambda_vol * 0.1
+        weights['lambda_light'] = args_training.lambda_light * 0.1
     elif phase == "phase2":
         # Phase 2: lambda_dens linearly increases from 0 to 10% of final
-        # lambda_a and lambda_v stay at 10% (not yet ramping)
+        # lambda_a, lambda_v, lambda_light stay at 10% (not yet ramping)
         phase2_total = args_training.phase3_start - args_training.phase2_start
         phase2_progress = (iteration - args_training.phase2_start) / max(phase2_total, 1)
         dens_ratio = min(phase2_progress, 1.0) * 0.1
         weights['lambda_dens'] = args_training.lambda_dens * dens_ratio
         weights['lambda_aniso'] = args_training.lambda_aniso * 0.1
         weights['lambda_vol'] = args_training.lambda_vol * 0.1
+        weights['lambda_light'] = args_training.lambda_light * 0.1
     elif phase == "phase3":
-        # Phase 3: lambda_a, lambda_v, lambda_d all gradually raised to final
+        # Phase 3: lambda_a, lambda_v, lambda_d, lambda_light all gradually raised to final
         phase3_total = args_training.iterations - args_training.phase3_start
         phase3_progress = (iteration - args_training.phase3_start) / max(phase3_total, 1)
         phase3_progress = min(phase3_progress, 1.0)
 
-        # lambda_dens: from 10% to 100%
-        dens_ratio = 0.1 + 0.9 * phase3_progress
-        weights['lambda_dens'] = args_training.lambda_dens * dens_ratio
-        # lambda_aniso: from 10% to 100%
-        aniso_ratio = 0.1 + 0.9 * phase3_progress
-        weights['lambda_aniso'] = args_training.lambda_aniso * aniso_ratio
-        # lambda_vol: from 10% to 100%
-        vol_ratio = 0.1 + 0.9 * phase3_progress
-        weights['lambda_vol'] = args_training.lambda_vol * vol_ratio
+        ratio = 0.1 + 0.9 * phase3_progress
+        weights['lambda_dens'] = args_training.lambda_dens * ratio
+        weights['lambda_aniso'] = args_training.lambda_aniso * ratio
+        weights['lambda_vol'] = args_training.lambda_vol * ratio
+        weights['lambda_light'] = args_training.lambda_light * ratio
     else:
         weights['lambda_dens'] = args_training.lambda_dens
         weights['lambda_aniso'] = args_training.lambda_aniso
         weights['lambda_vol'] = args_training.lambda_vol
+        weights['lambda_light'] = args_training.lambda_light
 
     return weights
 
@@ -121,6 +120,7 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
     # Setup iterators
     train_cameras = scene.getTrainCameras()
+    t0_cameras = scene.getT0Cameras()
 
     # Learning rate schedulers
     bg_color = scene.background
@@ -148,13 +148,20 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         lambda_weights = get_dynamic_lambda_weights(iteration, opt, phase)
 
         # --------------------------------------------------------------
-        # Phase-specific: weight schedule differs per phase (Sec 4.1.2).
-        # ALL phases use all timesteps with MLP trainable — like 4DGS
-        # coarse→fine, the "canonical frame" emphasis comes from loss
-        # weights (λ_a=10%, λ_v=10%), not from data filtering.
-        # Without all views, 28 t=0 frames are insufficient for 3D recon.
+        # Phase-specific (Sec 4.1.2):
+        #   Phase 1: canonical frame, t=0 ONLY, MLP FROZEN (3DGS procedure)
+        #   Phase 2: dynamics, all timesteps, MLP trainable
+        #   Phase 3: refinement, all timesteps, MLP trainable
         # --------------------------------------------------------------
-        viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
+        if phase == "phase1":
+            gaussians.freeze_mlp()
+            if len(t0_cameras) == 0:
+                raise RuntimeError("No t=0 cameras available for Phase 1!")
+            viewpoint_cam = t0_cameras[iteration % len(t0_cameras)]
+        else:
+            if phase == "phase2":
+                gaussians.unfreeze_mlp()
+            viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
 
         # --------------------------------------------------------------
         # Forward pass: render with spatio-temporal deformation
@@ -181,20 +188,22 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
             lambda_weights['lambda_ssim'] * (1.0 - ssim_loss_val)
 
         # --------------------------------------------------------------
-        # Physics-based losses (on DEFORMED + ACTIVATED state).
-        # MLP always trainable → deformed state always meaningful.
-        # Weights (λ) from dynamic schedule control per-phase magnitude.
+        # Physics-based losses (Phase 2+ only; in Phase 1 MLP frozen → Δ=0
+        # → deformed=canonical, physics on canonical is redundant with visual)
         # --------------------------------------------------------------
-        physics_losses = gaussians.compute_physics_losses(
-            p_t=render_pkg["deformed_xyz"],
-            scales_activated=render_pkg["scales_activated"],
-            opacities_activated=render_pkg["opacities_activated"],
-            shs=render_pkg["shs"],
-            iteration=iteration,
-            lambda_weights=lambda_weights,
-        )
-        for loss_name, loss_val in physics_losses.items():
-            loss += loss_val
+        if phase != "phase1":
+            physics_losses = gaussians.compute_physics_losses(
+                p_t=render_pkg["deformed_xyz"],
+                scales_activated=render_pkg["scales_activated"],
+                opacities_activated=render_pkg["opacities_activated"],
+                shs=render_pkg["shs"],
+                iteration=iteration,
+                lambda_weights=lambda_weights,
+            )
+            for loss_name, loss_val in physics_losses.items():
+                loss += loss_val
+        else:
+            physics_losses = {}
 
         loss.backward()
 
