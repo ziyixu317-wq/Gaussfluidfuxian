@@ -145,8 +145,9 @@ class Scene:
             center = cam_positions.mean(axis=0)
             extent = np.linalg.norm(cam_positions.max(axis=0) - cam_positions.min(axis=0))
 
-            num_pts = 10000
-            points = center + (np.random.random((num_pts, 3)) - 0.5) * extent * 0.5
+            num_pts = 30000
+            # Use tighter bounds for better convergence with random init
+            points = center + (np.random.randn(num_pts, 3)) * extent * 0.15
             # Initialize colors based on camera view colors
             colors = np.ones_like(points) * 0.5  # neutral gray
             normals = np.zeros_like(points)

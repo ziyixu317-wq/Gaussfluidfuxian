@@ -213,6 +213,17 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
         loss.backward()
 
+        # Gradient clipping: prevent MLP explosion when entering Phase 2
+        if phase != "phase1":
+            torch.nn.utils.clip_grad_norm_(
+                gaussians.spatio_temporal_encoder.parameters(),
+                max_norm=1.0
+            )
+            torch.nn.utils.clip_grad_norm_(
+                [gaussians._transform_feature],
+                max_norm=1.0
+            )
+
         iter_end.record()
 
         # --------------------------------------------------------------
