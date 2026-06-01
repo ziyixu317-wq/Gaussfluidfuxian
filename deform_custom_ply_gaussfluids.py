@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
     # Assign args
     for attr in ['sh_degree', 'source_path', 'model_path', 'white_background',
-                 'resolution', 'eval', 'load_iteration']:
+                 'resolution', 'eval', 'load_iteration', 'custom_ply', 'save_ply']:
         if hasattr(args, attr):
             setattr(lp, attr, getattr(args, attr))
 
