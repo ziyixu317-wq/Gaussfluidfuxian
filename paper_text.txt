@@ -1,0 +1,957 @@
+=== PAGE 1 ===
+PacificGraphics2025/M.Christie,N.Pietroni,andY.-S.Wang ConferencePaper
+GaussFluids: Reconstructing Lagrangian Fluid Particles from
+Videos via Gaussian Splatting
+F.Du1 ,Y.Zhang† 1,2 ,Y.Ji1 ,X.Wang1 ,C.Yao1 ,J.Kosinka3 ,S.Frey3 ,A.Telea4 ,X.Ban‡ 1
+1SchoolofIntelligenceScience&Technology,UniversityofScience&TechnologyBeijing,China
+2ShundeInnovationSchool,UniversityofScienceandTechnologyBeijing,China
+3BernoulliInstitute,UniversityofGroningen,Netherlands
+4DepartmentofInformationandComputingSciences,UtrechtUniversity,Netherlands
+GaussFluids (b)downstream
+tasks,
+suchas
+(a)Reconstruction
+FluidVideos LagrangianFluidParticles Fluid Prediction Style Transfer Frame Interpolation
+Figure 1: GaussFluids (a) reconstructs Lagrangian particle-based fluid flow from videos for (b) downstream tasks, such as novel view
+synthesis,styletransfer,frameinterpolation,fluidprediction,fluidediting,etc.
+Abstract
+Fluidsimulationtypicallydependsonmanualmodelingandvisualassessmenttoachievedesiredoutcomes,whichlacksobjec-
+tivityandefficiency.Toaddressthislimitation,weproposeGaussFluids,anovelapproachfordirectlyreconstructingtemporally
+andspatiallycontinuousLagrangianfluidparticlesfromvideos.WeemployaLagrangianparticle-basedmethodinsteadofan
+Euleriangridasitprovidesadirectspatialmassrepresentationandismoresuitableforcapturingfinefluiddetails.First,to
+makediscretefluidparticlesdifferentiableovertimeandspace,weextendLagrangianparticleswithGaussianprobabilityden-
+sities,termedGaussianParticles,constructingadifferentiablefluidparticlerendererthatenablesdirectoptimizationofparticle
+positionsfromvisualdata.Second,weintroduceafixed-lengthtransformfeatureforeachGaussianParticletoencodepose
+changesovercontinuoustime.Next,topreservefundamentalfluidphysics—particularlyincompressibility—weincorporatea
+density-basedsoftconstrainttoguideparticledistributionwithinthefluid.Furthermore,weproposeahybridlossfunctionthat
+focusesonmaintainingvisual,physical,andgeometricconsistency,alongwithanimproveddensityoptimizationmoduletoef-
+ficientlyreconstructspatiotemporallycontinuousfluids.WedemonstratetheeffectivenessofGaussFluidsonmultiplesynthetic
+andreal-worlddatasets,showingitscapabilitytoaccuratelyreconstructtemporallyandspatiallycontinuous,physicallyplausi-
+bleLagrangianfluidparticlesfromvideos.Additionally,weintroduceseveraldownstreamtasks,includingnovelviewsynthesis,
+styletransfer,frameinterpolation,fluidprediction,andfluidediting,whichillustratethepracticalvalueofGaussFluids.
+CCSConcepts
+•Computingmethodologies Computergraphics;Machinelearning;Modelingandsimulation;
+!
+1. Introduction
+Fluid simulation is a significant research area with numerous ap-
+plications in computer animation, medicine, and industrial engi-
+neering. Computer fluid simulation can be primarily categorized
+† Correspondingauthor:zhangyl@ustb.edu.cn intoEuleriangridmethods,Lagrangianparticlemethods,andhy-
+‡ Correspondingauthor:banxj@ustb.edu.cn brid methods, based on the underlying data structure of the fluid
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+ThisisanopenaccessarticleunderthetermsoftheCreativeCommonsAttributionLicense,which
+permitsuse,distributionandreproductioninanymedium,providedtheoriginalworkisproperly
+cited.
+=== PAGE 2 ===
+2of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+[KBST22].Euleriangridmethodsdiscretizethefluiddomainintoa Weintroduceafixed-lengthtransformfeatureforeachGaussian
+•
+grid,assigningphysicalpropertiessuchasvelocityandpressureto Particleanddevelopaunifieddecodertodetermineparticlepose
+eachgridpoint.BysolvingtheNavier-Stokesequationsovertime, variationsatanygiventime,enablingspatiotemporallycontinu-
+thesemethodscapturefluidbehaviorandareparticularlysuitable ousfluidmotioninthereconstructedsimulation.
+forlarge-scalesimulations,suchasoceans[KBST22].Incontrast, Weincorporateadensity-basedsoftconstrainttoguideuniform
+•
+Lagrangianparticlemethodsrepresentthefluidasasetofparticles distribution,specificallywithin fluidregions,inorder tomain-
+withadefinedmass.Byupdatingparticlepositions,thesemethods tainfundamentalincompressibilityduringreconstruction.
+trackchangesinphysicalproperties,makingthemwellsuitedfor
+simulatingfluidswithrichmotiondetails,suchassmall-scalewater
+2. RelatedWork
+splashes[KBST22].
+2.1. Lagrangian-basedFluidSimulation
+However,achievingthedesiredfluideffectsusuallyrequiresex-
+Fluid simulation is a significant research area in computer vi-
+tensive manual modeling and visual comparison to fine-tune pa-
+sion and graphics. The Lagrangian method is favored due to
+rameters,whichdemandsconsiderableexpertiseandlacksobjec-
+its ability to directly track fluid particles, making it more suit-
+tivityandefficiency.
+able for simulating fluids with complex motion details. A promi-
+To address these issues, we introduce GaussFluids, a novel nent method in this domain is Smoothed Particle Hydrodynam-
+approach for directly extracting Lagrangian fluid particles from ics (SPH), which represents fluid dynamics through integral par-
+video data, as illustrated in Figure 1. We adopt the Lagrangian ticle approximation [Mon92]. To enforce fluid incompressibil-
+particle-based formulation because it offers a more precise spa- ity, Weakly Compressible SPH [BT07] employs the state equa-
+tial representation of fluid motion compared to the Eulerian grid tion method, calculating pressure based on compression. Sev-
+approach. Since Lagrangian particles form a discrete point-cloud eral methods have been developed to improve stability, including
+structure (i.e., discrete spheres), they do not by themselves de- Predictive-CorrectiveIncompressibleSPH[SP09]andDivergence-
+fine a spatially continuous differential field, which hinders back- Free SPH [BK15]. Beyond the state equation approach, Implicit
+propagation, and are therefore non-differentiable with respect to IncompressibleSPH[ICS⇤14]implementsprojectionmethodsby
+visual data [WQF19]. We therefore extend them with spatial solving the Poisson equation for particle pressures to achieve ac-
+Gaussian probability densities: adding Gaussians centered at the curatefluidsimulation.ThePosition-BasedFluid(PBF)[MM13]
+spherecenterscreatestherequireddifferentiablefield(seeSec.2.3 combines SPH with Position-Based Dynamics to directly correct
+of[KKLD23]);werefertotheresultingentitiesasGaussianParti- particlepositionswithoutexplicitlycomputingpressure.
+cles.Thisextensionprovideseachparticlewithagradientreceptive
+Fundamentally, fluid simulation involves solving complex par-
+fieldinitsneighborhood,thusenablingdirectoptimizationoffluid
+tial differential equations, and machine learning approaches have
+particle positions (which often include transparency) from visual
+been extensively applied to address these problems more ef-
+data.
+ficiently [LKA⇤21, XR21]. For Lagrangian fluids, given their
+Specifically, by integrating 3D Gaussian probability densities particle-based representation, specialized feature processing ar-
+withLagrangianfluidparticles,weconstructadifferentiableren- chitectures and learning-based fluid simulators have been devel-
+derer capable of mapping these Gaussian Particles to images, al- oped, including convolutional neural networks [UPTK20,WT24]
+lowing direct optimization of particle positions from visual data. andgraphneuralnetworks[SGGP⇤20,MZW⇤18].However,both
+Furthermore, we introduce a fixed-length transform feature for physics-basedandmachinelearning-basedfluidsimulationmeth-
+each Gaussian Particle. Using this feature, we employ a unified odstypicallylackdirectconnectionstoreal-worldfluids.Undoubt-
+temporal-spatialdecodingnetworktodetermineparticleposevari- edly,thetrendtowardleveragingrealfluidvideosisaninevitable
+ationsatanygiventime.Tomaintainthefundamentalincompress- development.
+ibilityoffluids,weincorporateadensity-basedsoftconstraintthat
+ensuresamoreuniformGaussianParticledistribution,particularly
+2.2. 3DReconstructionfromVisualData
+withinthefluidregion.Duringtraining,wedesignasetofmulti-
+dimensionallossfunctions,includingvisual-based,physics-based, Reconstructing3Dscenesfrom2Dimagesremainsacornerstone
+and geometric-based losses, alongside an improved density opti- of computer vision. Early techniques, such as stereo vision and
+mization module. This combined strategy ensures alignment be- structure from motion, leveraged geometric principles to deduce
+tween macroscopic fluid flow and microscopic details. Extensive depthinformation[SSS06,HZ03].Multi-ViewStereo(MVS)tech-
+experimentsonbothsyntheticandreal-worlddatasetsvalidatethe niquesfacilitatethecreationofdetailed3Dmodelsfrommultiple
+effectiveness of GaussFluids in reconstructing Lagrangian fluid images [GSC⇤07,HPP⇤18]. Neural networks have been progres-
+particles,facilitatingsubsequenttaskssuchasnovelviewsynthe- sivelyintegratedintothetaskof3Dreconstruction,includingnovel
+sis, style transfer, frame interpolation, fluid prediction, fluid edit- viewpointsynthesis[FNPS16,ZTS⇤16]andblendweightestima-
+ing,andmore. tion[HPP⇤18],predominantlyfollowingtheMVSapproach.The
+introduction of Neural Radiance Fields (NeRF) marked a signifi-
+Themaincontributionsofthispaperareasfollows:
+cantmilestone,providinganovelframeworkforsynthesizingreal-
+We extend Lagrangian particles with 3D Gaussian probability isticviewsofcomplexscenes[MST⇤22,BMV⇤22].Toaccelerate
+•
+densitiesandconstructadifferentiablerendererfromparticlesto reconstruction, various discretization strategies have been devel-
+imagesbasedonsplatting.Thisenablesthedirectoptimization opedtomitigatethecomputationalinefficiencyofmulti-layerper-
+ofLagrangianparticlepositionsfromimagesorvideos. ceptron(MLP)queries[FKYT⇤22,WXZ⇤22,YLT⇤21,MESK22].
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 3 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 3of13
+The3DGaussianSplatting(3DGS)methodfurtherenhancesinter- videos.3D-IntPhys[XTT⇤23]adoptsaconditionalNeRF-stylevi-
+pretabilityandcomputationalefficiencybyrepresentingrenderable sual frontend and a 3D point-based dynamics prediction backend
+primitivesinexplicit3DGaussianforms[KKLD23,YCH⇤24],en- to learn 3D-grounded intuitive physics from videos of complex
+ablingreal-time,high-qualitynovelviewsynthesisatreducedcom- scenes,thoughitseffectivenesshasyettobefullyevaluated.Re-
+putationalcost. cently,DEL[JJZ⇤24]integratedlearnablegraphkernelsintoDis-
+crete Element Analysis to learn material dynamics from partial
+In dynamic 3D reconstruction, researchers have incorporated
+2Dobservationsinaunifiedmanner,butitspracticalperformance
+a temporal dimension into NeRF, either by introducing addi-
+remains unexplored. GaussFluids aims to reconstruct Lagrangian
+tional temporal encoding to handle object motion [PCPMMN21,
+fluidparticlesdirectlyfromvideos,enablingmultipledownstream
+LCM⇤24,DZY⇤21], or by directly extending the original NeRF
+tasks.
+framework[PSB⇤21,TTG⇤21,WCS⇤22,LSZ⇤22].Owingtotheir
+explicitrepresentation,3DGaussiansserveaseffectiveprimitives
+for dynamic modeling [YGZ⇤24,WYF⇤24,YYPZ24,LDZY24, 3. Method
+LCLX24]. Nevertheless, these methods typically encounter chal- AsillustratedinFigure1,GaussFluidsaimstoreconstructasetof
+lengeswhenappliedtosceneswithill-definedboundaries,partic- movingparticles overtime frommultiviewvideo data.The over-
+ularlyforfluids.Inthispaper,weproposeamethodthatleverages allprocessisdepictedinFigure2.GaussFluidstakesparticleswith
+notonlyamodifiedGaussiansplattingapproachforreconstruction randomly initialized positions as input and optimizes them using
+butalsoLagrangianfluidparticlesforsimulation. multiview fluid videos. First, (a) the fluid particles are extended
+into Gaussian Fluid Particles, which incorporate position p and
+additional Gaussian differentiable rendering primitives for splat-
+2.3. RadianceFieldandPhysics ting.Theseprimitivescomprisesphericalharmonics(SH)lighting
+coefficients c and opacity a for color control, as well as scal-
+Gaussian Splashing [FFS⇤25] leverages 3DGS to generate novel
+ing s and rotation r for shape control. (b) Each particle is asso-
+p it h c y a s n ics o - n b l a y se r d ec a o n n im st a ru ti c o t ns so in li v d ol b v o in u g nd fl a u r i i d es –s u o s li i d ng co 3 u D pl G in S g , . w H h o i w le ev t e h r e , ciated with a transform feature q 2 R Nq, where N q is the dimen-
+sion of the transform feature vector, which is used to decode the
+fluid component remains synthetically defined in virtual scenes.
+changesintheGaussianposeovertime—specificallyDp,Ds,and
+PhysGaussian[XZQ⇤24]employsacustomMaterialPointMethod
+Dr—contributingtotheconstructionofthecovariancematrixS.(c)
+(MPM) to enhance 3D Gaussian kernels with physically mean-
+Throughsplattingdifferentiablerenderingfromthecameraviewd,
+ingfulattributesforkinematicdeformationandmechanicalstress,
+hybridconstraintsareincorporatedintothelossfunction,optimiz-
+followingtheprinciplesofcontinuummechanics.However,these
+ingboththerenderingprimitivesandthetransformfeaturesofthe
+methodscannotreconstructfluidsfromvideos.Forsmoke,apar-
+Gaussian Particles. (d) Finally, an improved density optimization
+ticularlychallengingfluidtype,FluidNexus[GYZW25]integrates
+moduleisappliedtoguideLagrangianfluidmotionreconstruction
+3DGS with PBF and exploits pre-trained image generation and
+from the perspectives of visual, physical, and geometric consis-
+videorefinementmodelstoreconstructphotorealisticsmoke.Nev-
+tency.
+ertheless,itsrequirementforscene-specificparameterpre-training
+severelylimitsthescalabilityandapplicabilityofFluidNexus.
+3.1. GaussianFluidParticles
+Currentphysics-basedradiancefieldmethodspredominantlyfo-
+GaussFluidsisanovelattempttoreconstructspatio-temporalconti-
+cus on solids or elastic bodies, with limited attention to fluid dy-
+nuityofLagrangianfluidparticlesdirectlyfromvideos.Toachieve
+namics.Torecoverfluiddensityandvelocityfromsparsemultiview
+this,weuseGaussianparticlestorepresentfluidparticlesinsteadof
+videos,HyFluid[YZG⇤23]introducesphysics-basedlossestoinfer
+traditionalpointclouds.Thisisbecausepointcloudsarespatially
+aphysicallyplausiblevelocityfield.PAC-NeRF[LQYC⇤23]uses
+discrete structures, and according to the principles of calculus, if
+ahybridEulerian-Lagrangianrepresentationoftheneuralradiance
+thedomainofafunctionisdiscrete,derivativescannotbedefined
+fieldtoestimatebothunknowngeometryandphysicalparameters
+atthosepoints,makingthemnon-differentiable.Gaussianparticles,
+forhighlydynamicobjectsfrommultiviewvideos.
+ontheotherhand,introducecontinuityandmaintaindifferentiabil-
+The reconstruction of fluids is often challenging, particularly ity,therebyenablingtheoptimizationofparticlesfromvisualdata.
+duetotheirinherenthighrefractivityandreflectivity.MirrorGaus-
+UndertheLagrangiandescription,fluidisdiscretizedintoaset
+sian [LTC⇤25] is a pioneering method for mirror scene recon-
+ofparticles,simulatinginteractionswithrelevantconstraintstode-
+struction with real-time rendering based on 3D Gaussian Splat-
+rivefluidmotionfromoneframetothenext.Thepositionsatany
+ting.GlossyGS[LHG⇤25]employsmicrofacetgeometrysegmen- timet,denotedasPt R N ⇥ 3 (whereN denotesthetotalnumber
+tationpriorsandintegratesmaterialpriorstoaccuratelyreconstruct 2
+ofparticles),canbeobtainedfromtheinitialparticlepositionsP0
+thegeometryandmaterialpropertiesofglossyobjects.Transpar-
+usingaLagrangianfluidsimulator ,suchthatPt= (P0 ,t).Note
+entGS[HYD⇤25]introduces transparentGaussianprimitives, en-
+thatP0 = (P0 ,0).Lagrangianfluid
+L
+dynamicsarego
+L
+vernedbytwo
+ablingspecularrefractionviaadeferredrefractionstrategy. L
+criticalconstraints:
+For fluid systems, NeuroFluid [GDWY22] infers state transi- Navier-StokesEquationsdescribetheconservationofmomen-
+tionsandinteractionswithinfluidparticlesystemsfromvisualob- tum:
+s c e le rv p a o ti s o i n ti s on o s f a t n h d e c fl a u n i n d ot su d r i f r a e c c e t , ly b r u e t co it ns re tr q u u c i t re d s yn in a i m tia ic l fl fl u u i i d d s p f a ro rt m i- ⇢ Du = p+µ 2 u+f, (1)
+Dt  r r
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 4 ===
+4of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+Lighting SHs # Lighting SHs #
+Randomly
+Initialized Opacity $ Opacity $
+Position ! Mean !
++
+Lagrangian
+Scaling " Rotation & (b) Covariance MatrixΣ
+FluidParticles Gaussian
+(a)
+Fluid Particles Transform Feature % Δ! Δ" Δ& Gaussian Frame
+Data Flow
+Φ(#) Camera%
+Grads Flow Splatting (c)
+GaussFluids
+Optimization (d)
+Multi-view FluidVideos
+&=( & +( &
+Density Optimization of ! "#$ % &&'(
++( & +( &
+Gaussian Fluid Particles ) *+'&, - ./+&
+*+(,,%) +( 0 & 1,2 +( 3 & ,4 +( 5 & 2'#67
+Figure2:ThepipelineofGaussFluids.TheoptimizationprocessbeginswithrandomlyinitializedLagrangianfluidparticles.GaussFluids
+optimizestheseparticlesusingmultiviewfluidvideos.(a)TheLagrangianparticlesareextendedtoGaussianParticleswith3DGaussian
+probabilitydensity[KKLD23],carryingextrarenderinginformationthatmakesfluidparticlesdifferentiableforvisualdata.(b)Weintroduce
+atransformfeatureqforeachGaussianParticle.ThroughtheunifiedneuralnetworkF,itestimateschangesintheGaussianposeovertime
+t(representedinthefrequencydomainfromt).(c)Byemployingsplattingdifferentiablerenderingfromcamerad,thecarefullydesigned
+constraintlossLisbackpropagatedtoeachGaussianParticle,enablingefficientoptimization.(d)Improveddensityoptimizationusesgradient
+informationtostrategicallydensifyandprunetheparticles.
+where⇢ isthe fluiddensity, u R 3 isthe velocityfield, pisthe pixelx,thecolor xiscomputedby
+pressure field, µ is the viscosit 2 y, and f R 3 represents external C
+2 k 1
+forcesactingonthefluid. x=ÂG
+k
+(x)ak (c
+k
+)’  1 Gj (x)aj , (3)
+C S  
+k j=1
+Incompressibility Condition arises from the continuity equa-    
+wherekindexestheGaussianParticlesinascendingorderoftheir
+tion in fluid dynamics, stating that the fluid density remains con-
+depthfromthecamera.G (x)isthe2DGaussianweightatpixelx,
+stantifthedivergenceofthevelocityfieldatanypositioniszero: k
+derivedfrompandSasin[ZPvBG01],and denotesSH.
+S
+d⇢ Ratherthanapplyinguniformvaluesacrosstheentirescene,we
+= ⇢ u=0. (2)
+dt   r· assigneachparticleindependentparametersforpose,opacity,and
+color. This approach acknowledges that particles in different re-
+This condition is fundamental for fluid simulation, as it ensures gionsmayrequiredistinctappearancecharacteristics.However,we
+that the internal fluid pressure maintains consistency throughout incorporateaconsistencysoftconstraintandemploydensityopti-
+thefluidbody.Lagrangianfluidparticlesonlycarrykinematicin- mization(Section3.3)forefficienttraining.
+formation,includingpositionsPt andvelocitiesUt,both 2 R N ⇥ 3. Bycomputingthedifferencebetweenthesplattedandground-
+Torendertheseparticles,additionalparameterssuchasparticlera-
+truthimages,gradientsarebackpropagatedtoeachGaussianPar-
+diusR,opacitya,andcolorc R 3mustbeintroduced.
+2 ticle’s attributes, including pose and rendering parameters. This
+mechanismenablesGaussFluidstodirectlyoptimizeGaussianPar-
+Becausefluidparticles,likeotherpointclouds,arenotdifferen-
+ticlesfrommultiviewvideodata.
+tiablewithrespecttovisualdata[WQF19],weincorporateGaus-
+sianprobabilitydensityintoeachfluidparticle,creatingGaussian
+Particles. Specifically, each Gaussian Particle is characterized by
+3.2. Spatio-TemporalEncoding
+itspositionp R 3,aswellasscalings R 3androtationr R 4to
+2 2 2
+constructthecovariancematrixSfollowing[KKLD23].Thisfor- Tomodelthetemporalandspatialevolutionoffluidparticles,we
+mulationdefinestheparticleposeA= p,s,r .Duringrendering, proposeanovelspatio-temporalencodingstrategy.Traditionalfluid
+{ }
+opacity a controls transparency, and a first-order SH coefficients simulationmethodstypicallyemploytime-steppingtechniquesfor
+cdeterminestheparticle’scolor.Higher-frequencylightingeffects temporaldiscretizationtotrackthemotiontrajectoryofeachfluid
+areomittedforsimplicity. particle [Mon92,BT07,BK15]. These methods generally assume
+that forces and accelerations remain constant within timesteps.
+Weimplementsplattingasourdifferentiablerenderingmecha- However, finding an efficient yet effective timestep size is chal-
+nism, projecting each Gaussian Particle onto the image plane. At lenging.
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 5 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 5of13
+Torepresentthecomplexdynamicsoffluidparticlemotion,in- geometricisotropyvia:
+steadofdiscreterepresentations,GaussFluidsencodeseachparti-
+2
+clewithatransformfeatureq—afixed-lengthvector—andstores
+L =
+1
+Â
+N si
+(1,1,1) . (8)
+trajectory features at the particle level. A globally shared multi- aniso N    1     
+i=1  V3   
+layer perceptron (MLP) network F decodes q together with time    i   
+     
+t, represented in the frequency domain from t using the method Here, si represents the scaling o f the i-th parti  cle, and six, siy, siz
+described in [RBA⇤19], to obtain the transformation DAt at time representitscomponentsinthe    x,y,andzdire   c   tions,respectively.
+t.Thisformulationenablescontinuousrepresentationofparticles Additionally,foruniformfluidparticles,differentparticlesshould
+in both temporal and spatial domains, thereby avoiding temporal maintainconsistentopacityandcolor.Thus,wedefine:
+discretization.BasedonthenotationintroducedinSection3.1,this
+processisformulatedasfollows:
+Lop=L
+MSE
+(a), L
+light
+=L
+MSE
+(c), (9)
+DA t =F(q,t),A t =A 0+DA t. (4) 1 N 1 N 2
+L
+MSE
+(y)=
+N i
+Â
+=1
+yi
+ N i
+Â
+=1
+yi
+!
+. (10)
+With this encoding method, the spatial position of each parti-
+cleatanygiventimecanbeaccuratelydetermined.Thisapproach
+Here,ai andci representtheopacityandSHlightingcoefficients
+ofthei-thparticle,respectively.
+notonlyenhancesthetemporalandspatialcontinuityofthefluid
+representationbutalsoenablesdownstreamtaskssuchastimein- Thefinallossfunctioncombinesvisualconsistencyterms(L
+rgb
+terpolation,asdemonstratedinSection4.3.2. andL from[KKLD23]),physicalconstraints,andgeometric
+d-ssim
+regularization,witheachtermweightedbyacorrespondinglpa-
+rameter:
+3.3. DensityOptimizationandConstraintConditions
+L=lrL
+rgb
++lsL
+d-ssim
++ld L
+dens
++laL
+aniso
+UsingMLPstomodelthemotionofparticlesensuresvisualconsis- +lvL
+vol
++loLop+ll L
+light
+. (11)
+tencybutneglectsthefundamentalphysicalpropertiesofthefluid,
+suchasincompressibility.AccordingtoEquation(2),densitycon-
+4. Experiments
+straintsensurethatthemassperunitvolumeremainsconstantre-
+gardlessofhowthefluidmovesordeforms,whichiskeytoachiev- TovalidatetheefficacyofGaussFluids,weconductedexperiments
+ingmassconservation. onbothsyntheticandreal-worlddatasets.Wefocusontwomain
+aspects:(1)theeffectivenessofreconstructingfluidparticles’mo-
+We implement a density soft constraint while preserving vi-
+tion from videos, and (2) the applications of these reconstructed
+sual fidelity. Specifically, the mass of fluid particles is defined as
+particlesinsubsequenttasks.
+unit mass, and a smoothing kernel function W is used to com-
+pute the density estimate i at the location of fluid particle i.
+D
+Thissmoothingkernelapproachiswidelyadoptedinparticle-based 4.1. ExperimentsSetup
+fluid simulations to distribute attributes across neighboring parti-
+4.1.1. Environment
+cles[Mon92,MCG03].Wedefinethedensitylossas:
+All experiments were performed on a machine equipped with an
+L dens = N 1 Â N D ¯ i   1 2 , D i = Â Ni W( k pi   pj k 2 ,h), (5) N 2. V 40 I G D H IA z, R a T nd X 6 3 4 0 G 90 B , D an D I R n 4 te m l(R ai ) n X m e e o m n( o R ry ) . S T i h lv e e s r o 4 ft 2 w 1 a 0 r R ee C n P v U iro @ n-
+i=1✓D ◆ j=1
+mentincludesPython3.7,PyTorch1.12.1,andCUDA11.8.
+whereNi representsthenumberofneighboringparticlesofparti-
+clei,and D ¯ = N 1 Â N i=1D iistheaveragedensityacrossallparticles. 4.1.2. ImplementationDetails
+Here, pi and pj denote the positions of particles i and j, respec-
+The iteration process consists of three phases: the first phase fo-
+tively.ThesmoothingkernelfunctionchosenhereisPoly6:
+cusesontrainingcanonicalframeparticles,thesecondphasecon-
+315 (h2 r2)3, if0 r h, centratesonlearningthedynamicscene,andthethirdphaseem-
+W(r,h)=     (6) phasizesparticlerefinement.Eachphasecommencesafterthepre-
+64ph9 (0, otherwise,
+viousphasehasconverged.Wefoundthistobeaneffectivestrategy
+forreconstructingtemporallyandspatiallycontinuousfluidparti-
+whererdenotesthedistancebetweentwoparticlesandhdenotes
+clesfromvideos.
+thesmoothinglength.
+To enable Gaussian Particles to approximate Lagrangian parti- Table1:Theweightsassignedtoeachlossterm
+cles,allparticlesshouldmaintainvolumeconsistencyvia:
+L vol = N 1 Â N V V¯ i   1 2 , Vi =sixsiysiz , (7) W Se e tt i i g n h g t 0 l . r 2 0 l . s 1 0 l . d 1 0 l . a 1 0 l . v 1 0 l .0 o 1 l 1 l
+i=1✓ ◆
+whereV¯ = N 1 Â N i=1 Viistheaveragevolumeacrossallparticles,and Thecanonicalframephasefollowstheofficial3DGS[KKLD23]
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 6 ===
+6of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+procedureandsetup.IntheSpatio-TemporalEncodingmodule,the smallerradii(0.007m).WaterSpheredemonstratesmoreextensive
+transformfeaturedimensionN issetto64.Thedecodernetwork movementpatterns,resultinginfewerandlargerparticles.
+q
+F has 4 hidden layers, each containing 256 neurons, with ReLU
+TheScalarFlowreconstructionresultsarepresentedinFigure6.
+activation in every layer. Both are initialized to zero. The learn-
+ingratesforthefeaturespaceandtheMLPnetworkaresetto10  2 TheparticleradiusafterreconstructionwithGaussFluidsisapprox-
+and10  4,respectively.Theablationstudiesrelatedtothissetupare imately0.006m.Thesecondrowdepictstherenderingwith80%
+Gaussianscaling,demonstratingGaussFluids’effectiveinterpreta-
+discussedinSection4.2.3.Theweightsassignedtoeachlossterm,
+tion of the scene. The third row shows the reconstruction results
+asshowninTable1,arechosenprimarilytoensurethatthemag-
+intheparticlestate;theparticlescanbeobservedgraduallydiffus-
+nitudes of the different loss terms remain within a similar range.
+ing upwards from the bottom while maintaining the same smoke
+Additionally,weemployadynamicweightingscheduleduringthe
+morphologyasintheoriginalvideo.
+three phases described above. In Phase 1, ld is set to 0 (density
+ignored),whilelaandlvaresetto10%oftheirfinalvaluestopri-
+oritizevisualconsistency.InPhase2,ld increaseslinearlyto10% 4.2.2. FluidDynamics
+ofitsfinalvaluetoencourageamoreuniformparticledistribution. In Lagrangian fluid simulation, maintaining incompressibil-
+InPhase3,la,lv,andld aregraduallyraisedtotheirfinalvalues. ity—where each fluid particle’s density remains constant—is a
+GaussFluidsisnothighlysensitivetothefinalabsoluteweights,but fundamental soft constraint, as described by Equation (2). Us-
+gradualschedulingiscrucialtoavoidearlyover-regularizationand ing the WaterSphere scene as an example, we compute the stan-
+structuraldistortion.AblationresultsonWaterSphere,showninTa- darddeviationof i foreachframe,asshowninFigure4.Com-
+ble2,confirmtheeffectivenessofthedynamicweightingschedule. paredwithD3G[Y D GZ⇤24]andSGFS[LCLX24],whicharepurely
+vision-based4Dreconstructionmethodslackingphysicalguidance,
+WeemploytheK-NearestNeighborsalgorithm(K=64)forop-
+GaussFluidsachievesthelowestandmostconsistentstandarddevi-
+erationsinvolvingneighboringparticles.Additionally,thesmooth-
+ationvalues,indicatingsuperiorpreservationofincompressibility.
+ing kernel radius h in Equation (5) is set to 0.3 to balance accu-
+These results demonstrate that GaussFluids not only reconstructs
+racyandcomputationalefficiency.Empirically,0.3performedbest
+surfaceparticlesbuteffectivelycapturesinteriorfluidphysics.
+amongtestedvaluesandisconsistentwithpriorrecommendations
+intheliterature[JYJY22,KBST19]. Mechanical energy (the sum of gravitational potential energy
+andkineticenergy)isanothercrucialphysicalmetric.Asshownin
+4.1.3. Datasetinformation Figure5,wealsousetheWaterSpherescenetovisualizechanges
+in mechanical energy. The kinetic energy initially increases due
+ThesyntheticdatasetNeuroFluid[GDWY22]wasgeneratedusing
+to gravitational acceleration, while gravitational potential energy
+theDFSPHalgorithm[BK15]andrenderedinBlender.Thisdataset
+gradually decreases in the absence of collisions. Upon the fluid’s
+features three scenarios: WaterCube, WaterSphere, and Honey-
+contactwiththecontainer’sbottom,gravitationalpotentialenergy
+Cone,eachcapturedfromfivefrontal-viewcameraswithoutpos-
+stabilizes, causing kinetic energy to diminish until the total me-
+terior angles. The scenarios simulate fluid dynamics over a one-
+chanical energy reaches a steady state. Compared to D3G and
+second interval, with WaterCube and HoneyCone at 99 fps and
+SGFS, GaussFluids demonstrates more physically consistent en-
+WaterSphere at 60 fps. All images were rendered at a resolution
+ergydissipation,suggestingthatthereconstructedLagrangianflu-
+of400 400pixels.Materialpropertiesfor‘Water’includeaGlass
+BSDF ⇥ shaderwithaviscosityof0.08andadensityof1000kg/m3. idsbetterconformtoestablishedphysicalprinciples.
+‘Honey’ismodeledwithaPrincipledBSDFshader,aviscosityof
+0.8,andadensityof1420kg/m3. 4.2.3. AblationStudy
+ToinvestigatehowtheparameterselectionofthenetworkFaffects
+The ScalarFlow dataset [EUT19] consists of real, five-view
+reconstruction efficiency and accuracy, we performed an ablation
+smokerecordingscontaining104differentsmokeflows,eachwith
+study using the 20th frame of the WaterCube scene. This frame
+150framesof2Dgrayscaleimagesataresolutionof1080 1920
+⇥ was chosen because it contains an intense collision state, placing
+pixels.WeperformedXORoperationsbetweeneachframeandthe
+significant demands on temporal feature encoding and decoding.
+firstframetoremovethebackground,andweuseonechannelfor
+As shown in Table 4, a feature-vector dimension of 64 with 256
+theSHlightingsincetheimagesaregrayscale.
+neuronsprovidesanoptimaltrade-offbetweenperformanceandef-
+ficiency.Whenthefeaturedimensionis32,thevisualresultsshow
+particlesexitingtheboundariesdirectly,leadingtoreconstruction
+4.2. ReconstructedLagrangianFluidParticles
+failure.Parametersettingsbeyondthesevaluesofferonlymarginal
+4.2.1. ParticleReconstruction performance improvements while incurring substantial computa-
+tionalcosts.
+TheLagrangianmethodusesparticlestorepresentobjects.Figure3
+illustrates the reconstruction of the HoneyCone and WaterSphere Forthesyntheticdataset,thecurrentsetupemploysfivecamera
+scenesfromtheNeuroFluiddataset,representingtwodistinctma- views. We examine the effect of reducing the synthetic dataset’s
+terialproperties.GaussFluidseffectivelyreproducesthefluidmor- cameraviewstofour,three,andtwo,respectively.AsshowninTa-
+phologies,withdetailedreconstructionsevidentatbothmacroand ble5,withonlytwoviews,reconstructionfailswhichisconsistent
+microscales.HoneyConeexhibitsdenserparticleformationsdueto withestablishedprinciplesincomputervisionwheretwoviewsare
+itshigherviscosity,asshowninTable3,with62,927particlesand insufficientforreliable3Dreconstruction.Increasingfromthreeto
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 7 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 7of13
+Table2:AblationofdynamiclossweightschedulingonWaterSphere.“Dynamic”denotestheproposeddynamicweightingschedule.
+Condition PSNR SSIM Comment
+" "
+Currentcoefficients(dynamic) 32.45 0.912 Three-phasedynamicweightingschedule
+Currentcoefficients(fixed) 23.85 0.764 Earlystrongconstraintscausedistortion
+50%coefficients(dynamic) 32.37 0.913 Minimaldifferencefromoriginal
+200%coefficients(dynamic) 32.03 0.909 Slightreduction,notsignificant
+Table3:ReconstructionresultsontheNeuroFluiddataset. 4.3. DownstreamApplications
+4.3.1. NovelViewpointSynthesis
+Particles Radius Averaged Time
+Dataset Opacity
+(Count) (m) Density (min) Novel viewpoint synthesis is a fundamental task in 3D recon-
+struction. Conventional methods predominantly reconstruct sur-
+HoneyCone 62927 0.007 0.6% 3407.51 16
+WaterCube 33650 0.0150 1.4% 1962.27 14 face color fields without capturing the underlying physical struc-
+WaterSphere 41280 0.0120 1.1% 2738.42 16 ture.Incontrast,GaussFluidsreconstructsfluidparticleswithcon-
+tinuous temporal coherence while maintaining high-fidelity vi-
+sual reconstruction. To evaluate novel viewpoint synthesis per-
+Table4:Effectsofdifferentfeaturedimensionsandneuronquanti- formance, we selected the HoneyCone scene as an experimental
+tiesonreconstructionefficiencyandquality,usingthe20thframe case, reconstructing it from four viewpoints and reserving an ad-
+oftheWaterCubesceneasanexample.The"Total"columnrepre- ditionalonefortesting.WecompareourapproachwiththeNeRF-
+sentsthesumofthetimeforboth"Splatting"and"F"operations. basedD-NeRF[PCPMMN21]method,aswellasthe4DGS-based
+Notethatafeaturedimensionof64and256neuronsachievesafa- D3G[YGZ⇤24]andSGFS[LCLX24]approaches.
+vorablebalancebetweenperformanceandefficiency.
+AsillustratedinFigure7,D-NeRF[PCPMMN21],whichbuilds
+uponNeRF,exhibitslimitationswithrestrictedviews,resultingin
+Reconstructionquality Time(s)
+Feature Neurons poorgeneralizationandsuboptimalvisualqualityfromnovelview-
+dim. perlayer Max. Max. points.Similarly,theD3Gmethod[YGZ⇤24]exhibitsvisualincon-
+Splatting F Total
+density speed(m/s) sistenciesduetoinsufficientinputviewsanditssurface-basedre-
+constructionapproach,ashighlightedbytheredboxes.Incontrast,
+32 128 1462.07 341.96 0.021 0.0070.028
+the SGFS method [LCLX24] achieves more effective reconstruc-
+32 256 1626.70 298.05 0.027 0.0190.046
+tionfromsparseviewpointsowingtoitsexplicitspatialfeaturestor-
+64 256 2583.63 89.43 0.045 0.0320.077
+agemechanism.GaussFluids,byutilizinginter-frameinformation
+64 512 2635.25 87.59 0.048 1.0351.083
+(Equation(4)),consistentlyproducesrobustreconstructionresults
+128 512 2597.80 85.24 0.047 1.8351.882
+with sparse viewpoints and accurately captures fluid details. Al-
+thoughGaussFluidsprimarilyemploysfirst-orderSHlighting,we
+haveenhanceditsperformancebyincorporatingthird-orderhigh-
+frequencycomponentstoimprovelightingrepresentationfidelity.
+fourviewssignificantlyimprovesperformance,whilethetransition
+We provide a quantitative evaluation on the WaterCube scene
+fromfourtofiveviewsoffersdiminishingreturns,duetothelim-
+atframe60,aspresentedinTable6.PSNR(PeakSignal-to-Noise
+itedangulardiversityintheNeuroFluiddataset’scamerapositions.
+Ratio)measuresoverallreconstructionfidelity,withhighervalues
+indicatingclosercorrespondencetogroundtruth.SSIM(Structural
+Similarity Index) quantifies structural preservation, where higher
+scores reflect enhanced visual consistency. GaussFluids achieves
+Table5:AblationstudyresultsontheHoneyConescene.S1:Co- superiorperformanceacrossthesemetricscomparedtoalternative
+variance matrix is hardcoded to a scaled identity matrix. S2: All methods,partiallyattributabletoitscapacitytoreconstructnotonly
+particlesshareidenticalopacityandcolor.S3:AllowsSHtovary thefluidsurfacebutalsotheinteriorfluidphysics.
+overtime."FAILED"indicatesthatthemethoddidnotconvergeor
+producemeaningfulresults.
+Table 6: Quantitative evaluation of novel viewpoint synthesis on
+Particles Particles Averaged theWaterCubescene(frame60).HigherPSNRandSSIMvalues
+Setup Opacity
+Number Radius(m) Density indicatebettervisualquality.
+5views 62927 0.007 0.6% 3407.51
+MethodGaussFluidsD3G SGFSD-NeRF
+4views 61215 0.007 1.2% 3150.77
+3views 11475 0.037 13.6% 1075.84 PSNR 29.65 25.65 27.34 8.14
+"
+2views FAILED FAILED FAILED FAILED SSIM 0.874 0.801 0.834 0.6402
+"
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 8 ===
+8of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+4.3.2. TemporalResampling meaningful results because 3DGS only reconstructs surface par-
+ticles, leaving NeuroFluid unable to refine them. Furthermore, to
+Table 7: Temporal Resampling Results (HoneyCone scene from underscore the importance of the density constraint (Section 3.3)
+60fpsto120fps).HigherPSNR/SSIMvaluesindicatebettervisual for capturing volumetric fluid properties essential for prediction,
+quality, and lower Jitter values represent smoother temporal con- wecompareagainstanablatedversionofourmethod,GaussFluids
+sistency.Jitterismeasuredbycalculatingthestandarddeviationof (w/odensityconstraint).Withoutthisconstraint,thereconstruction
+per-pixeltemporaldifferencesbetweenadjacentframes. tendstofocusonsurfaceparticles,similarto3DGS.Consequently,
+thesubsequentPBFsimulation,whichreliesonvolumetricparticle
+Method PSNR SSIM Jitter interactions,failstoproducephysicallyplausiblepredictions.The
+" " # numerical indicators in Table 8 confirm that GaussFluids excels
+GaussFluids 30.08 0.905 0.046
+across multiple metrics, and the ablated version performs poorly,
+D3G 28.92 0.871 0.096
+underscoring the effectiveness of its fluid prediction capabilities
+SGFS 29.31 0.883 0.078
+whenvolumetricconsistencyismaintained.
+Ourapproach,whichrepresentsfluidparticlemotionviacontin- 4.3.5. FluidEditing
+uoustemporalencodingratherthandiscretetimesteps,enablespre-
+The Lagrangian particle representation of GaussFluids allows di-
+cisetemporalresamplingoffluidanimationsandfacilitateshigh-
+rectfluidediting.InFigure10,50%ofWaterSphereparticlesare
+fidelity frame interpolation. We evaluate this capability using the
+removed, and the simulation continues, maintaining physical co-
+HoneyCone scene by upsampling the frame rate from 60fps to
+herence.
+120fps.AsdemonstratedinTable7,GaussFluidsattainssuperior
+performance with the highest PSNR/SSIM values and the lowest
+Jittermeasure,owingtoitsphysics-awarereconstructionmethod- 4.4. Discussion
+ology. Visual demonstrations of these results are provided in the
+ToverifytheeffectivenessofGaussFluidsinextractingcontinuous
+supplementaryvideomaterials.
+spatiotemporalLagrangianparticlesofflowingfluidsfrommulti-
+viewvideos,thissectionpresentsacomprehensiveanalysisbased
+4.3.3. StyleTransfer onbothsyntheticandreal-worlddatasets.First,weconductvisual
+GaussFluids can reconstruct fluid motion in a Lagrangian parti- and physical evaluations to demonstrate the physical plausibility
+clestate,enablingstyletransfer.AsshowninFigure8,weassign of the reconstructed particles. Then, we introduce several down-
+newmaterialstothereconstructedparticlesandsubsequentlyren- streamtaskstoillustratethepracticalvalueofGaussFluids,includ-
+derthem,achievingdifferentvisualappearances.InFigure6from ingnovelviewpointsynthesis,temporalinterpolation,styletrans-
+theScalarFlowdataset,thefourthrowisgeneratedbyre-rendering fer,andfluidprediction.
+particleswithapinkcolortodemonstrateadditionalstyletransfer Nonetheless,duetoimaginglimitations,scenariosinvolvingoc-
+results. clusionorlow-contrastregionsareinevitable,occasionallyleading
+tosuboptimalreconstructionoutcomes.Mitigatingthisissuemay
+4.3.4. FluidPrediction requirefurtherconsiderationoffluid-specificpropertiestoenhance
+reconstructionaccuracy.
+Table8:FluidpredictiononWaterSphere.HigherPSNR/SSIMval-
+uesindicatebetterquality.
+5. Conclusion
+Method PSNR SSIM Toaddresstheissuesofrelianceonmanualmodelingandparame-
+" "
+tertuninginfluidsimulation,whichoftenlackobjectivityandeffi-
+GaussFluids 32.45 0.912
+ciency,thispaperproposesGaussFluids,amethodthatdirectlyre-
+3DGS+NeuroFluid 15.32 0.412
+constructsflowingLagrangianfluidparticlesfromvideodata.The
+GaussFluids(w/odensityconstraint) 13.55 0.328
+Lagrangian-basedrepresentationcapturesmoredetailedfluidmo-
+tionbutisinherentlynon-differentiablewithrespecttovisualdata.
+BecauseGaussFluidsreconstructsthefluidinaLagrangianpar- GaussFluidsextendsLagrangianfluidparticleswith3DGaussian
+ticlestate,itcanbeemployedforfluidmotionprediction.Weuse probabilitydensities,enablingthedirectoptimizationoffluidpar-
+theWaterSpheredatasetandreconstructtheinitial20framesasa ticlepositionsfromvisualdata.GaussFluidsachievesbothtempo-
+particlerepresentation.AsshowninFigure9,GaussFluidslearns ral and spatial continuity of fluid particles during reconstruction
+bothfluidparticlerenderingproperties(e.g.,colorandopacity)for while maintaining fundamental fluid incompressibility, especially
+futurerendering,andfluidparticlemotionproperties(e.g.,veloc- within the fluid region. Experiments on both synthetic and real-
+ityandrestdensity)forsubsequentsimulation.Wethenusethese worlddatasetsdemonstrateitseffectivenessandbroadapplicability
+propertieswithPBF[MM13]tosimulatethenext40frames.For innovelviewsynthesis,temporalresampling,styletransfer,fluid
+comparison, we first rely on 3DGS [KKLD23] to reconstruct the prediction,andfluidediting.Unliketraditionalforwardmodeling
+initial frame’s particles, followed by NeuroFluid [GDWY22] to approachesinfluidsimulation,GaussFluidsprovidesanovelcom-
+predictfutureframes.WhileGaussFluids’predictionremainscon- putationalframeworkforfluidresearch,especiallywhenleveraging
+sistent with the ground truth, 3DGS+NeuroFluid fails to produce real-worldfluiddata.
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 9 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 9of13
+References [JYJY22] JIAOT.,YEM.,JINM.,YANGJ.: Decoupledfiniteparticle
+methodwithnormalizedkernel(dfpm-nk):Acomputationallyefficient
+[BK15] BENDERJ.,KOSCHIERD.: Divergence-freesmoothedparticle methodforsimulatingsolutetransportinheterogeneousporousmedia.
+hydrodynamics. InProceedingsofthe14thACMSIGGRAPH/Euro- WaterResourcesResearch58,8(2022),e2022WR032308.6
+graphicsSymposiumonComputerAnimation(LosAngeles,California,
+2015),AssociationforComputingMachinery,pp.147–155.2,4,6
+[KBST19] KOSCHIERD.,BENDERJ.,SOLENTHALERB.,TESCHNER
+M.: Smoothedparticlehydrodynamicstechniquesforthephysicsbased
+[BMV⇤22] BARRONJ.T.,MILDENHALLB.,VERBIND.,SRINIVASAN simulationoffluidsandsolids.Eurographics2019-Tutorials(2019).6
+P.P.,HEDMANP.: Mip-nerf360:Unboundedanti-aliasedneuralradi-
+[KBST22] KOSCHIERD.,BENDERJ.,SOLENTHALERB.,TESCHNER
+ance fields. In 2022 IEEE/CVF Conference on Computer Vision and
+M.:Asurveyonsphmethodsincomputergraphics.ComputerGraphics
+PatternRecognition(2022),pp.5460–5469.2
+Forum41,2(2022),737–760.2
+[BT07] BECKER M., TESCHNER M.: Weakly compressible sph [KKLD23] KERBL B., KOPANAS G., LEIMKUEHLER T., DRETTAKIS
+for free surface flows. In Proceedings of the 2007 ACM SIG- G.: 3dgaussiansplattingforreal-timeradiancefieldrendering. ACM
+GRAPH/Eurographics Symposium on Computer Animation (Goslar, TransactionsonGraphics42,4(2023),1–14.2,3,4,5,8
+DEU,2007),EurographicsAssociation,pp.209–217.2,4
+[LCLX24] LI Z., CHEN Z., LI Z., XU Y.: Spacetime gaussian fea-
+[DZY⇤21] DUY.,ZHANGY.,YUH.-X.,TENENBAUMJ.B.,WUJ.: turesplattingforreal-timedynamicviewsynthesis. InProceedingsof
+Neuralradianceflowfor4dviewsynthesisandvideoprocessing.In2021 theIEEE/CVFConferenceonComputerVisionandPatternRecognition
+IEEE/CVFInternationalConferenceonComputerVision(2021),IEEE (2024),pp.8508–8520.3,6,7
+ComputerSociety,pp.14304–14314.3
+[LCM⇤24] LIUJ.-W.,CAOY.-P.,MAOW.,ZHANGW.,ZHANGD.J.,
+[EUT19] ECKERT M.-L., UM K., THUEREY N.: Scalarflow:alarge- KEPPOJ.,SHANY.,QIEX.,SHOUM.Z.:Devrf:fastdeformablevoxel
+scalevolumetricdatasetofreal-worldscalartransportflowsforcom- radiancefieldsfordynamicscenes. InProceedingsofthe36thInter-
+puteranimationandmachinelearning. ACMTransactionsonGraphics nationalConferenceonNeuralInformationProcessingSystems(2024),
+38,6(2019),1–16.6 CurranAssociatesInc.,p.Article2664.3
+[FFS⇤25] FENG Y., FENG X., SHANG Y., JIANG Y., YU C., ZONG [LDZY24] LIN Y., DAI Z., ZHU S., YAO Y.: Gaussian-flow: 4d re-
+Z.,SHAOT.,WUH.,ZHOUK.,JIANGC.: Gaussiansplashing:Uni- constructionwithdynamic3dgaussianparticle. InProceedingsofthe
+fiedparticlesforversatilemotionsynthesisandrendering. InProceed- IEEE/CVF Conference on Computer Vision and Pattern Recognition
+ingsoftheComputerVisionandPatternRecognitionConference(2025), (2024),pp.21136–21145.3
+pp.518–529.3 [LHG⇤25] LAIS.,HUANGL.,GUOJ.,CHENGK.,PANB.,LONGX.,
+[FKYT⇤22] FRIDOVICH-KEIL S., YU A., TANCIK M., CHEN Q. H.,
+j
+L
+e
+Y
+ct
+U
+sw
+J.
+i
+,
+th
+L
+3
+V
+dg
+C
+a
+.
+u
+,
+s
+G
+sia
+U
+n
+O
+sp
+Y
+l
+.
+a
+:
+ttin
+G
+g
+l
+.
+o
+I
+s
+E
+sy
+E
+g
+E
+s:
+T
+I
+r
+n
+a
+v
+n
+e
+s
+r
+a
+s
+c
+e
+tio
+re
+n
+n
+s
+d
+o
+e
+n
+ri
+V
+ng
+isu
+o
+a
+f
+li
+g
+z
+l
+a
+o
+t
+s
+io
+sy
+na
+o
+n
+b
+d
+-
+RECHT B., KANAZAWA A.: Plenoxels:Radiancefieldswithoutneu-
+ComputerGraphics(2025),1–14.3
+ralnetworks. In2022IEEE/CVFConferenceonComputerVisionand
+PatternRecognition(2022),pp.5491–5500.2 [LKA⇤21] LI Z., KOVACHKI N. B., AZIZZADENESHELI K., BHAT-
+TACHARYA K., STUART A., ANANDKUMAR A.: Fourier neural op-
+[FNPS16] FLYNNJ.,NEULANDERI.,PHILBINJ.,SNAVELYN.:Deep-
+eratorforparametricpartialdifferentialequations.InInternationalCon-
+stereo:Learningtopredictnewviewsfromtheworld’simagery.In2016
+ferenceonLearningRepresentations(2021).2
+IeeeConferenceonComputerVisionandPatternRecognition(2016),
+pp.5515–5524.2 [LQYC⇤23] LIX.,QIAOY.-L.,YICHENCHENP.,MURTHYJATAVAL-
+LABHULA K., LIN M., JIANG C., GAN C.: Pac-nerf: Physics aug-
+[GDWY22] GUAN S. Y., DENG H. Y., WANG Y. B., YANG X. K.: mentedcontinuumneuralradiancefieldsforgeometry-agnosticsystem
+Neurofluid:Fluiddynamicsgroundingwithparticle-drivenneuralradi- identification. InTheEleventhInternationalConferenceonLearning
+ancefields. InInternationalConferenceonMachineLearning(2022), Representations(2023).3
+vol.162.3,6,8
+[LSZ⇤22] LIT.,SLAVCHEVAM.,ZOLLHOEFERM.,GREENS.,LASS-
+[GSC⇤07] GOESELEM.,SNAVELYN.,CURLESSB.,HOPPEH.,SEITZ NERC.,KIMC.,SCHMIDTT.,LOVEGROVES.,GOESELEM.,NEW-
+S. M.: Multi-view stereo for community photo collections. In 2007 COMBER.,LVZ.:Neural3dvideosynthesisfrommulti-viewvideo.In
+Ieee11thInternationalConferenceonComputerVision(2007),vol.1-6, 2022IEEE/CVFConferenceonComputerVisionandPatternRecogni-
+pp.825–+.2 tion(2022),pp.5511–5521.3
+[GYZW25] GAOY.,YUH.-X.,ZHUB.,WUJ.: Fluidnexus:3dfluid [LTC⇤25] LIU J., TANG X., CHENG F., YANG R., LI Z., LIU J.,
+reconstructionandpredictionfromasinglevideo.IntheIEEE/CVFCon- HUANG Y., LIN J., LIU S., WU X., XU S., YUAN C.: Mirrorgaus-
+ferenceonComputerVisionandPatternRecognition(2025),pp.26091– sian:Reflecting3dgaussiansforreconstructingmirrorreflections. In
+26101.3 ComputerVision–ECCV2024(2025),LeonardisA.,RicciE.,RothS.,
+RussakovskyO.,SattlerT.,VarolG.,(Eds.),SpringerNatureSwitzer-
+[HPP⇤18] HEDMAN P., PHILIP J., PRICE T., FRAHM J.-M., DRET-
+land,pp.377–393.3
+TAKISG.,BROSTOWG.:Deepblendingforfree-viewpointimage-based
+rendering.ACMTrans.Graph.37,6(2018),Article257.2 [MCG03] MÜLLERM.,CHARYPARD.,GROSSM.:Particle-basedfluid
+simulationforinteractiveapplications.InProceedingsofthe2003ACM
+[HYD⇤25] HUANG L., YE D., DAN J., TAO C., LIU H., ZHOU K., SIGGRAPH/Eurographics symposium on Computer animation (2003),
+RENB.,LIY.,GUOY.,GUOJ.:Transparentgs:Fastinverserendering EurographicsAssociation,p.154–159.5
+oftransparentobjectswithgaussians. ACMTransactionsonGraphics
+[MESK22] MÜLLER T., EVANS A., SCHIED C., KELLER A.: Instant
+(2025).3
+neuralgraphicsprimitiveswithamultiresolutionhashencoding. ACM
+[HZ03] HARTLEYR.,ZISSERMANA.: Multipleviewgeometryincom- TransactionsonGraphics41,4(2022),1–15.2
+putervision.Cambridgeuniversitypress,2003.2
+[MM13] MACKLINM.,MÜLLERM.:Positionbasedfluids.ACMTrans-
+[ICS⇤14] IHMSENM.,CORNELISJ.,SOLENTHALERB.,HORVATHC., actionsonGraphics32,4(2013),1–12.2,8
+TESCHNER M.: Implicit incompressible sph. IEEE Transactions on [Mon92] MONAGHANJ.J.: Smoothedparticlehydrodynamics. Annual
+VisualizationandComputerGraphics20,3(2014),426–435.2 ReviewofAstronomyandAstrophysics30(1992),543–574.2,4,5
+[JJZ⇤24] JIAXUW.,JINGKAIS.U.N.,ZIYIZ.,JUNHAOH.,QIANG [MST⇤22] MILDENHALLB.,SRINIVASANP.P.,TANCIKM.,BARRON
+Z., MINGYUAN S., RENJING X.: Del:Discreteelementlearnerfor J.T.,RAMAMOORTHIR.,NGR.: Nerf:Representingscenesasneural
+learning3dparticledynamicswithneuralrendering.InTheThirty-eighth radiancefieldsforviewsynthesis. CommunicationsoftheAcm65,1
+AnnualConferenceonNeuralInformationProcessingSystems(2024).3 (2022),99–106.2
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 10 ===
+10of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+[MZW⇤18] MROWCAD.,ZHUANGC.,WANGE.,HABERN.,FEI-FEI [XZQ⇤24] XIET.,ZONGZ.,QIUY.,LIX.,FENGY.,YANGY.,JIANG
+L., TENENBAUM J. B., YAMINS D. L. K.: Flexibleneuralrepresen- C.:Physgaussian:Physics-integrated3dgaussiansforgenerativedynam-
+tationforphysicsprediction. Inthe32ndInternationalConferenceon ics. InProceedingsoftheIEEE/CVFConferenceonComputerVision
+NeuralInformationProcessingSystems(2018),CurranAssociatesInc., andPatternRecognition(2024),pp.4389–4398.3
+p.8813–8824.2
+[YCH⇤24] YU Z., CHEN A., HUANG B., SATTLER T., GEIGER A.:
+[PCPMMN21] PUMAROLA A., CORONA E., PONS-MOLL G., Mip-splatting:Alias-free3dgaussiansplatting. InProceedingsofthe
+MORENO-NOGUER F.: D-nerf: Neural radiance fields for dynamic IEEE/CVF Conference on Computer Vision and Pattern Recognition
+scenes. In2021Ieee/CvfConferenceonComputerVisionandPattern (2024),pp.19447–19456.3
+Recognition(2021),pp.10313–10322.3,7
+[YGZ⇤24] YANGZ.,GAOX.,ZHOUW.,JIAOS.,ZHANGY.,JINX.:
+[PSB⇤21] PARK K., SINHA U., BARRON J. T., BOUAZIZ S., GOLD- Deformable3dgaussiansforhigh-fidelitymonoculardynamicscenere-
+MAND.B.,SEITZS.M.,MARTIN-BRUALLAR.:Nerfies:Deformable construction.InProceedingsoftheIEEE/CVFConferenceonComputer
+neural radiance fields. In 2021 Ieee/Cvf International Conference on VisionandPatternRecognition(2024),pp.20331–20341.3,6,7
+ComputerVision(2021),pp.5845–5854.3 [YLT⇤21] YU A., LI R. L., TANCIK M., LI H., NG R., KANAZAWA
+[RBA⇤19] RAHAMANN.,BARATINA.,ARPITD.,DRAXLERF.,LIN A.:Plenoctreesforreal-timerenderingofneuralradiancefields.In2021
+M., HAMPRECHT F., BENGIO Y., COURVILLE A.: On the spectral Ieee/CvfInternationalConferenceonComputerVision(2021),pp.5732–
+biasofneuralnetworks. Inthe36thInternationalConferenceonMa- 5741.2
+chineLearning(2019),KamalikaC.,RuslanS.,(Eds.),vol.97,PMLR, [YYPZ24] YANGZ.,YANGH.,PANZ.,ZHANGL.: Real-timephoto-
+pp.5301–5310.5 realisticdynamicscenerepresentationandrenderingwith4dgaussian
+[SGGP⇤20] SANCHEZ-GONZALEZ A., GODWIN J., PFAFF T., YING splatting. InTheTwelfthInternationalConferenceonLearningRepre-
+R., LESKOVEC J., BATTAGLIA P.: Learning to simulate complex sentations(2024).3
+physicswithgraphnetworks. InProceedingsofthe37thInternational [YZG⇤23] YUH.-X.,ZHENGY.,GAOY.,DENGY.,ZHUB.,WUJ.:
+ConferenceonMachineLearning(Virtual,2020),HalDauméI.,Aarti Inferringhybridneuralfluidfieldsfromvideos. InProceedingsofthe
+S.,(Eds.),vol.119,PMLR,pp.8459–8468.2 37th International Conference on Neural Information Processing Sys-
+[SP09] SOLENTHALERB.,PAJAROLAR.: Predictive-correctiveincom-
+tems(2023),CurranAssociatesInc.,p.Article2777.3
+pressiblesph.ACMTransactionsonGraphics28,3(2009),1–6.2 [ZPvBG01] ZWICKERM.,PFISTERH.,VANBAARJ.,GROSSM.:Ewa
+volumesplatting.Visualization2001,Proceedings(2001),29–36.4
+[SSS06] SNAVELYN.,SEITZS.M.,SZELISKIR.: Phototourism:Ex-
+ploringphotocollectionsin3d. AcmTransactionsonGraphics25,3 [ZTS⇤16] ZHOUT.,TULSIANIS.,SUNW.,MALIKJ.,EFROSA.A.:
+(2006),835–846.2 Viewsynthesisbyappearanceflow. InComputerVision–ECCV2016
+(2016),vol.9908ofComputerVision–ECCV2016,SpringerInterna-
+[TTG⇤21] TRETSCHKE.,TEWARIA.,GOLYANIKV.,ZOLLHÖFERM.,
+tionalPublishing,pp.286–301.2
+LASSNERC.,THEOBALTC.: Non-rigidneuralradiancefields:Recon-
+structionandnovelviewsynthesisofadynamicscenefrommonocular
+video. In2021Ieee/CvfInternationalConferenceonComputerVision
+(2021),pp.12939–12950.3
+[UPTK20] UMMENHOFERB.,PRANTLL.,THUEREYN.,KOLTUNV.:
+Lagrangianfluidsimulationwithcontinuousconvolutions. InInterna-
+tionalConferenceonLearningRepresentations(Virtual,2020).2
+[WCS⇤22] WENG C. Y., CURLESS B., SRINIVASAN P. P., BAR-
+RON J. T., KEMELMACHER-SHLIZERMAN I.: Humannerf: Free-
+viewpoint rendering of moving people from monocular video. In
+2022Ieee/CvfConferenceonComputerVisionandPatternRecognition
+(2022),pp.16189–16199.3
+[WQF19] WUW.,QIZ.,FUXINL.:Pointconv:Deepconvolutionalnet-
+workson3dpointclouds. In2019IEEE/CVFConferenceonComputer
+VisionandPatternRecognition(2019),pp.9613–9622.2,4
+[WT24] WINCHENBACH R., THUEREY N.: Symmetricbasisconvolu-
+tionsforlearninglagrangianfluidmechanics. InTheTwelfthInterna-
+tionalConferenceonLearningRepresentations(2024).2
+[WXZ⇤22] WUX.,XUJ.,ZHUZ.,BAOH.,HUANGQ.,TOMPKINJ.,
+XUW.: Scalableneuralindoorscenerendering. ACMTransactionson
+Graphics41,4(2022),1–16.2
+[WYF⇤24] WUG.,YIT.,FANGJ.,XIEL.,ZHANGX.,WEIW.,LIU
+W., TIANQ., WANG X.: 4dgaussiansplattingforreal-timedynamic
+scenerendering. InProceedingsoftheIEEE/CVFConferenceonCom-
+puterVisionandPatternRecognition(2024),pp.20310–20320.3
+[XR21] XUR.-J.,RENB.: Solvingthefluidpressurewithaniterative
+multi-resolution guided network. The Visual Computer 38, 2 (2021),
+433–442.2
+[XTT⇤23] XUE H., TORRALBA A., TENENBAUM J., YAMINS D., LI
+Y., TUNG H.-Y.: 3d-intphys:Towardsmoregeneralized3d-grounded
+visualintuitivephysicsunderchallengingscenes.InAdvancesinNeural
+InformationProcessingSystems(2023),OhA.,NaumannT.,Globerson
+A.,SaenkoK.,HardtM.,LevineS.,(Eds.),vol.36,CurranAssociates
+Inc.,pp.7116–7136.3
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 11 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 11of13
+Video Reconstructed Video Reconstructed
+Figure4:Standarddeviationof iintheWaterSpherescene,where
+D
+thehorizontalaxisrepresentstimeframes.GaussFluidsmaintains
+theloweststandarddeviation,underscoringitsstrongadherenceto
+incompressibility.
+Figure5:Temporalvariationsofaveragemechanicalenergyforthe
+reconstructed particles, using WaterSphere. GaussFluids exhibits
+graduallydissipatingmechanicalenergy,withthemostsignificant
+dropoccurringasthefluidcollideswiththecontainerbottom.By
+contrast,D3Gshowsfluctuationsinmechanicalenergy,occasion-
+Figure 3: Reconstructed particles for the HoneyCone and Water- ally even increasing, whereas SGFS experiences an excessively
+Sphere scenes of the NeuroFluid dataset. GaussFluids uses only rapid initial energy drop. These results collectively indicate that
+videoinputtoreconstructcomplete,temporallyandspatiallycon- GaussFluids more closely aligns with physical laws. Subplots of
+tinuousLagrangianfluidparticles.Ashighlightedintheredboxes, kineticandgravitationalpotentialenergyarealsoprovided.
+fluiddetailsarealsopreserved.
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 12 ===
+12of13 FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting
+gniredneRelcitraPnaissuaG
+elcitraPdetcurtsnoceR
+elcitraPdezilytS
+semarFoediVtupnI
+)gnilacS%08(
+noitatneserpeR
+noitatneserpeR
+Figure 6: Visual results of GaussFluids on the ScalarFlow dataset. The first row shows the input video frames. The second row presents
+GaussianParticlesextractedbyGaussFluids,renderedwithan80%scalingfactor.Thethirdrowvisualizesthereconstructedparticlerep-
+resentations,whilethefourthrowdemonstratestheapplicationofanovelstyletotheextractedGaussianParticles.Theseresultshighlight
+GaussFluids’capabilitytoeffectivelyhandlesmoke-likefluidphenomenaandenablesubsequentfluidstyletransfertasks.
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.
+=== PAGE 13 ===
+FeilongDu,etal./GaussFluids:ReconstructingLagrangianFluidParticlesfromVideosviaGaussianSplatting 13of13
+TG
+sdiulFssuaG
+G3D
+SFGS
+FReN-D
+Figure 7: Visual reconstruction effects. Renderings from novel
+viewpoints of NeRF-type methods are often unsatisfactory. The
+D3G and SGFS methods, although able to generate alternatives
+fornewviewpoints,faceocclusionissuescausedbysurfacerecon-
+struction,highlightedbytheredboxes.Incontrast,GaussFluidsef-
+fectivelyhandlessuchchallengesanddelivershigh-qualityresults.
+oediV
+detcurtsnoceR
+1redneRweN
+2redneRweN
+Figure 8: Style Transfer Demonstration. Using the WaterSphere
+sceneasanexample,weassignnewmaterialstothereconstructed
+particlestoachievevariousstylizedrenderingeffects.
+oediV
+detcurtsnoceR
+noitciderP
+Figure9:FluidPrediction.Thefirstrowshowstheoriginalvideo
+frames,whilethesecondrowpresentsthereconstructedparticles.
+ThethirdrowdisplaysthesimulatedresultsusingPBF,demonstrat-
+ingitsabilitytopredictfluidmotion.
+Figure 10: Fluid editing demonstration. Half of the WaterSphere
+particlesareremoved,andtheirmotionispredicted.
+©2025TheAuthor(s).
+ProceedingspublishedbyEurographics-TheEuropeanAssociationforComputerGraphics.

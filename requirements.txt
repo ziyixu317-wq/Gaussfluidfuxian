@@ -1,0 +1,10 @@
+torch>=1.12.1
+plyfile
+numpy
+scipy
+matplotlib
+tqdm
+imageio
+opencv-python
+tensorboard
+pytorch3d
