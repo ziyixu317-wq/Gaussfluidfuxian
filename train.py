@@ -273,7 +273,7 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
                 # PSNR
                 with torch.no_grad():
-                    psnr_val = psnr(image.unsqueeze(0), gt_image.unsqueeze(0)).mean()
+                    psnr_val = psnr(image.unsqueeze(0), gt_rgb.unsqueeze(0)).mean()
                     tb_writer.add_scalar('train/psnr', psnr_val.item(), iteration)
 
         # --------------------------------------------------------------
