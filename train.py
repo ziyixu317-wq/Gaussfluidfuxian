@@ -100,21 +100,24 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
     first_iter = 0
     tb_writer = SummaryWriter(os.path.join(dataset.model_path, "logs"))
 
-    # Initialize model
+    # Initialize model (encoder and particle params created on CPU initially)
     gaussians = GaussianFluidParticles(
         sh_degree=dataset.sh_degree,
         gaussfluids_params=vars(gaussfluids_params)
     )
-    gaussians.training_setup(opt)
 
-    # Initialize scene
+    # Initialize scene (calls create_from_pcd: particle params now on CUDA)
     scene = Scene(dataset, gaussians)
 
     # Load checkpoint if specified
     if dataset.load_iteration is not None:
         first_iter = dataset.load_iteration
 
+    # Move encoder to CUDA BEFORE optimizer creation so param refs are correct
     gaussians.spatio_temporal_encoder.cuda()
+
+    # Register all (now GPU-resident) params with optimizer
+    gaussians.training_setup(opt)
 
     # Setup iterators
     train_cameras = scene.getTrainCameras()
