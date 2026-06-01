@@ -239,14 +239,13 @@ class GaussianFluidParticles(nn.Module):
 
         losses = {}
 
-        # Compute SPH density (KNN every physics_loss_stride iterations)
-        # For non-stride iterations, just skip density
-        stride = self.physics_loss_stride
-        if iteration % stride == 0 or iteration < 100:
-            densities = compute_sph_density(p_t, h=self.smoothing_length, k=self.knn_k)
-
-            if lambda_weights.get('lambda_dens', 0) > 0:
-                losses['L_dens'] = lambda_weights['lambda_dens'] * density_loss(densities)
+        # SPH density via KNN (expensive, skip when λ_d=0 or not on stride)
+        dens_w = lambda_weights.get('lambda_dens', 0)
+        if dens_w > 0:
+            stride = self.physics_loss_stride
+            if iteration % stride == 0:
+                densities = compute_sph_density(p_t, h=self.smoothing_length, k=self.knn_k)
+                losses['L_dens'] = dens_w * density_loss(densities)
 
         if lambda_weights.get('lambda_vol', 0) > 0:
             losses['L_vol'] = lambda_weights['lambda_vol'] * volume_loss(scales_activated)

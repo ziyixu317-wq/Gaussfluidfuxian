@@ -148,8 +148,8 @@ class Scene:
             extent = np.linalg.norm(cam_positions.max(axis=0) - cam_positions.min(axis=0))
 
             # Dense particles in tight central region (fluid is near center)
-            num_pts = 50000
-            radius = extent * 0.03  # ~0.65 units for extent=21.7
+            num_pts = 20000
+            radius = extent * 0.05  # ~1.1 units for extent=21.7
             points = center + (np.random.randn(num_pts, 3)) * radius
             # Initialize colors based on camera view colors
             colors = np.ones_like(points) * 0.5  # neutral gray

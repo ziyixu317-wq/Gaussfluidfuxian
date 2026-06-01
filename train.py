@@ -191,19 +191,23 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
         # --------------------------------------------------------------
         # Physics-based losses (on DEFORMED + ACTIVATED state)
-        # Weights (λ) control per-phase magnitude, so always compute.
-        # Density (KNN) is strided internally for performance.
+        # Paper: λ_a,λ_v,λ_d schedule in Sec 4.1.2 applies to deformed
+        # state s_t = s_0 + Δs. In Phase 1 MLP is frozen (Δs=0), so
+        # physics on canonical s_0 is redundant with visual loss. Skip.
         # --------------------------------------------------------------
-        physics_losses = gaussians.compute_physics_losses(
-            p_t=render_pkg["deformed_xyz"],
-            scales_activated=render_pkg["scales_activated"],
-            opacities_activated=render_pkg["opacities_activated"],
-            shs=render_pkg["shs"],
-            iteration=iteration,
-            lambda_weights=lambda_weights,
-        )
-        for loss_name, loss_val in physics_losses.items():
-            loss += loss_val
+        if phase != "phase1":
+            physics_losses = gaussians.compute_physics_losses(
+                p_t=render_pkg["deformed_xyz"],
+                scales_activated=render_pkg["scales_activated"],
+                opacities_activated=render_pkg["opacities_activated"],
+                shs=render_pkg["shs"],
+                iteration=iteration,
+                lambda_weights=lambda_weights,
+            )
+            for loss_name, loss_val in physics_losses.items():
+                loss += loss_val
+        else:
+            physics_losses = {}
 
         loss.backward()
 
