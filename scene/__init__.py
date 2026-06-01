@@ -130,36 +130,103 @@ class Scene:
                 break
 
         if pcd is None:
-            # Random initialization: estimate scene center from camera positions,
-            # then place particles in a tight Gaussian around center.
-            # Paper uses COLMAP init; without it we need dense particles in
-            # the expected fluid region for convergence.
-            print("No COLMAP point cloud found, initializing random point cloud...")
-            cam_positions = []
-            for cam_info in cam_infos[:min(50, len(cam_infos))]:
-                w2c = np.linalg.inv(np.vstack([
-                    np.hstack([cam_info.R.T, cam_info.T.reshape(3, 1)]),
-                    [0, 0, 0, 1]
-                ]))
-                cam_positions.append(w2c[:3, 3])
-
-            cam_positions = np.stack(cam_positions)
-            center = cam_positions.mean(axis=0)
-            extent = np.linalg.norm(cam_positions.max(axis=0) - cam_positions.min(axis=0))
-
-            # Dense particles in tight central region (fluid is near center)
-            num_pts = 20000
-            radius = extent * 0.05  # ~1.1 units for extent=21.7
-            points = center + (np.random.randn(num_pts, 3)) * radius
-            # Initialize colors based on camera view colors
-            colors = np.ones_like(points) * 0.5  # neutral gray
-            normals = np.zeros_like(points)
-            normals[:, 2] = 1.0  # default normal pointing up
-            pcd = BasicPointCloud(points=points, colors=colors, normals=normals)
-
-            print(f"Initialized {num_pts} random points within extent {extent:.3f}")
+            # No COLMAP — generate pseudo point cloud from multi-view images.
+            # Use alpha channel of t=0 frames to identify foreground, project
+            # rays into 3D, and initialize particles near the visual hull.
+            print("No COLMAP point cloud found, generating from multi-view images...")
+            pcd = self._init_from_images(args, cam_infos)
+            if pcd is None:
+                # Ultimate fallback
+                print("Image-based init failed, using random initialization...")
+                num_pts = 20000
+                center = np.zeros(3)
+                points = center + (np.random.randn(num_pts, 3)) * 1.0
+                colors = np.ones_like(points) * 0.5
+                normals = np.zeros_like(points)
+                normals[:, 2] = 1.0
+                pcd = BasicPointCloud(points=points, colors=colors, normals=normals)
+            print(f"Initialized {pcd.points.shape[0]} points")
 
         gaussians.create_from_pcd(pcd, self.cameras_extent)
+
+    def _init_from_images(self, args, cam_infos):
+        """
+        Generate pseudo point cloud from multi-view t=0 images.
+        Uses foreground pixels (alpha channel) to place particles near the visual hull.
+        """
+        from PIL import Image
+        t0_infos = [c for c in cam_infos if c.time <= self.mintime + 1e-6]
+        if len(t0_infos) < 2:
+            return None
+        print(f"  Using {len(t0_infos)} t=0 camera views for initialization")
+
+        all_points = []
+        all_colors = []
+        pts_per_view = 2000  # sample per camera view
+
+        for cam_info in t0_infos:
+            try:
+                img = Image.open(cam_info.image_path)
+                img_np = np.array(img.convert("RGBA")) / 255.0
+            except Exception:
+                continue
+
+            alpha = img_np[:, :, 3]
+            fg_mask = alpha > 0.1
+            fg_ys, fg_xs = np.where(fg_mask)
+            if len(fg_ys) < 10:
+                continue
+
+            # Sample foreground pixels
+            n_sample = min(pts_per_view, len(fg_ys))
+            idx = np.random.choice(len(fg_ys), n_sample, replace=False)
+            px_x = fg_xs[idx]
+            px_y = fg_ys[idx]
+            colors_sample = img_np[px_y, px_x, :3]
+
+            # Build camera-to-world transform
+            R_cam = cam_info.R.T  # R is stored transposed
+            T_cam = cam_info.T
+            c2w = np.eye(4)
+            c2w[:3, :3] = R_cam
+            c2w[:3, 3] = -R_cam @ T_cam
+
+            cam_center = c2w[:3, 3]
+
+            # Compute ray directions for sampled pixels
+            h, w = img_np.shape[:2]
+            focal = (w / 2) / np.tan(cam_info.FovX / 2)
+
+            # Normalized device coordinates
+            ndc_x = (px_x - w / 2) / focal
+            ndc_y = -(px_y - h / 2) / focal  # flip y
+            ndc_z = -np.ones_like(ndc_x)
+
+            dirs_cam = np.stack([ndc_x, ndc_y, ndc_z], axis=-1)
+            dirs_cam = dirs_cam / np.linalg.norm(dirs_cam, axis=-1, keepdims=True)
+
+            # Rotate to world
+            dirs_world = (R_cam @ dirs_cam.T).T
+
+            # Estimate depth: use median camera-to-center distance
+            depth = np.linalg.norm(cam_center)
+
+            # Place points along rays at estimated depth
+            pts = cam_center + dirs_world * depth * 0.6  # slightly inside
+
+            all_points.append(pts)
+            all_colors.append(colors_sample)
+
+        if len(all_points) == 0:
+            return None
+
+        points = np.vstack(all_points)
+        colors = np.vstack(all_colors)
+        normals = np.zeros_like(points)
+        normals[:, 2] = 1.0
+
+        print(f"  Generated {points.shape[0]} points from foreground pixels")
+        return BasicPointCloud(points=points, colors=colors, normals=normals)
 
     def getTrainCameras(self):
         return self.train_cameras
