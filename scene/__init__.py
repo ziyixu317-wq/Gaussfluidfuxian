@@ -86,8 +86,9 @@ class Scene:
         for cam in self.train_cameras:
             cam_centers.append(cam.camera_center.cpu().numpy())
         cam_centers = np.stack(cam_centers)
-        self.cameras_extent = np.linalg.norm(
-            cam_centers.max(axis=0) - cam_centers.min(axis=0)
+        self.cameras_extent = min(
+            np.linalg.norm(cam_centers.max(axis=0) - cam_centers.min(axis=0)),
+            5.0  # cap: fluid is small, large extent over-scales position_lr
         )
         print(f"Scene extent: {self.cameras_extent:.3f}")
 
@@ -208,11 +209,13 @@ class Scene:
             # Rotate to world
             dirs_world = (R_cam @ dirs_cam.T).T
 
-            # Estimate depth: use median camera-to-center distance
-            depth = np.linalg.norm(cam_center)
-
-            # Place points along rays at estimated depth
-            pts = cam_center + dirs_world * depth * 0.6  # slightly inside
+            # Estimate depth range: camera distance to origin, fluid is near center.
+            # Sample depths uniformly to fill a volume (not a shell).
+            cam_dist = np.linalg.norm(cam_center)
+            depth_min = cam_dist * 0.3
+            depth_max = cam_dist * 0.8
+            depths = np.random.uniform(depth_min, depth_max, size=len(dirs_world))
+            pts = cam_center + dirs_world * depths[:, np.newaxis]
 
             all_points.append(pts)
             all_colors.append(colors_sample)

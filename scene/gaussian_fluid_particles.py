@@ -199,9 +199,14 @@ class GaussianFluidParticles(nn.Module):
         scales_final = self._scaling + delta_s
 
         # Rotation: combine quaternions via multiplication
-        # Δr is additive quaternion perturbation, compose with base rotation
-        # Normalize delta_r, then quaternion-multiply with base
-        delta_r_norm = torch.nn.functional.normalize(delta_r, dim=-1)
+        # Default to identity quaternion when delta_r ≈ 0 (MLP zero-init / frozen)
+        # normalize([0,0,0,0]) = NaN, so handle the zero case explicitly
+        delta_r_norm = torch.zeros_like(delta_r)
+        delta_r_norm[:, 0] = 1.0  # identity quaternion: [1, 0, 0, 0]
+        nonzero = delta_r.norm(dim=-1) > 1e-8
+        if nonzero.any():
+            delta_r_norm[nonzero] = torch.nn.functional.normalize(
+                delta_r[nonzero], dim=-1)
         rotations_final = batch_quaternion_multiply(delta_r_norm, self._rotation)
 
         # Opacity: no deformation (paper only deforms p, s, r)
