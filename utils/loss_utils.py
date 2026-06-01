@@ -68,7 +68,10 @@ def density_loss(densities):
         densities: (N,) tensor of SPH density estimates
     """
     rho_bar = densities.mean()
-    return ((rho_bar / densities - 1) ** 2).mean()
+    # Clamp ratio to prevent NaN from extreme density values
+    ratio = rho_bar / (densities + 1e-10)
+    ratio = torch.clamp(ratio, min=0.01, max=100.0)
+    return ((ratio - 1) ** 2).mean()
 
 
 def volume_loss(scales_activated):
@@ -78,8 +81,11 @@ def volume_loss(scales_activated):
         scales_activated: (N, 3) tensor of exp-activated scales (s_x, s_y, s_z)
     """
     V_i = scales_activated[:, 0] * scales_activated[:, 1] * scales_activated[:, 2]
+    V_i = torch.clamp(V_i, min=1e-10, max=1e10)
     V_bar = V_i.mean()
-    return ((V_bar / V_i - 1) ** 2).mean()
+    ratio = V_bar / (V_i + 1e-10)
+    ratio = torch.clamp(ratio, min=0.01, max=100.0)
+    return ((ratio - 1) ** 2).mean()
 
 
 def anisotropy_loss(scales_activated):
@@ -89,9 +95,11 @@ def anisotropy_loss(scales_activated):
         scales_activated: (N, 3) tensor of exp-activated scales
     """
     V_i = scales_activated[:, 0] * scales_activated[:, 1] * scales_activated[:, 2]
-    det_cbrt = (V_i + 1e-10) ** (1.0 / 3.0)
+    det_cbrt = (V_i.clamp(min=1e-10) + 1e-10) ** (1.0 / 3.0)
     isotropic_ref = torch.ones_like(scales_activated)
-    return ((scales_activated / det_cbrt.unsqueeze(-1) - isotropic_ref) ** 2).mean()
+    ratio = scales_activated / det_cbrt.unsqueeze(-1)
+    ratio = torch.clamp(ratio, min=0.01, max=100.0)
+    return ((ratio - isotropic_ref) ** 2).mean()
 
 
 def opacity_consistency_loss(opacities):
