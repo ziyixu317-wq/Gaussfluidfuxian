@@ -96,7 +96,7 @@ def export_perframe(args, gaussfluids_params):
         sh_degree=args.sh_degree,
         gaussfluids_params=vars(gaussfluids_params)
     )
-    scene = Scene(args, gaussians)
+    scene = Scene(args, gaussians, load_iteration=args.load_iteration)
     gaussians.spatio_temporal_encoder.cuda()
 
     # Output directory
