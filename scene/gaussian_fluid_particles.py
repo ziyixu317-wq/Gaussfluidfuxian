@@ -338,25 +338,19 @@ class GaussianFluidParticles(nn.Module):
     def prune_points(self, mask):
         """Prune Gaussian points. Also prunes transform features."""
         valid_points_mask = ~mask
-        pruned_optimizer_state = self._optimizer_state_dict_with_transform_feature(
-            valid_points_mask, self.optimizer.state_dict()
-        )
+        optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
-        self._xyz = nn.Parameter(self._xyz[valid_points_mask])
-        self._features_dc = nn.Parameter(self._features_dc[valid_points_mask])
-        self._features_rest = nn.Parameter(self._features_rest[valid_points_mask])
-        self._scaling = nn.Parameter(self._scaling[valid_points_mask])
-        self._rotation = nn.Parameter(self._rotation[valid_points_mask])
-        self._opacity = nn.Parameter(self._opacity[valid_points_mask])
-        self._transform_feature = nn.Parameter(
-            self._transform_feature[valid_points_mask]
-        )
+        self._xyz = optimizable_tensors["xyz"]
+        self._features_dc = optimizable_tensors["f_dc"]
+        self._features_rest = optimizable_tensors["f_rest"]
+        self._scaling = optimizable_tensors["scaling"]
+        self._rotation = optimizable_tensors["rotation"]
+        self._opacity = optimizable_tensors["opacity"]
+        self._transform_feature = optimizable_tensors["transform_feature"]
+
         self.max_radii2D = self.max_radii2D[valid_points_mask]
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
         self.denom = self.denom[valid_points_mask]
-
-        # Update optimizer state
-        self.optimizer.load_state_dict(pruned_optimizer_state)
 
     def densification_postfix(self, new_xyz, new_features_dc, new_features_rest,
                               new_scaling, new_rotation, new_opacity,
@@ -424,23 +418,29 @@ class GaussianFluidParticles(nn.Module):
                 optimizable_tensors[name] = group["params"][0]
         return optimizable_tensors
 
-    def _optimizer_state_dict_with_transform_feature(self, mask, optimizer_state_dict):
-        """Prune optimizer state to match pruned tensors.
+    def _prune_optimizer(self, mask):
+        """Prune optimizer state and tensors to match pruned tensors.
         Only prunes per-particle groups; skips encoder/mlp params (fixed size).
         """
-        param_groups = optimizer_state_dict["param_groups"]
-        param_state = optimizer_state_dict["state"]
-        mask_len = mask.shape[0]
+        optimizable_tensors = {}
+        valid_names = ["xyz", "f_dc", "f_rest", "scaling", "rotation", "opacity", "transform_feature"]
+        for group in self.optimizer.param_groups:
+            name = group["name"]
+            if name not in valid_names:
+                continue
 
-        for group in param_groups:
-            stored_state = param_state.get(id(group["params"][0]), None)
+            stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:
-                for key in ["exp_avg", "exp_avg_sq"]:
-                    if key in stored_state and stored_state[key].shape[0] == mask_len:
-                        stored_state[key] = stored_state[key][mask]
-                del param_state[id(group["params"][0])]
-
-        return optimizer_state_dict
+                stored_state["exp_avg"] = stored_state["exp_avg"][mask]
+                stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][mask]
+                del self.optimizer.state[group['params'][0]]
+                group["params"][0] = nn.Parameter((group["params"][0][mask].requires_grad_(True)))
+                self.optimizer.state[group['params'][0]] = stored_state
+                optimizable_tensors[name] = group["params"][0]
+            else:
+                group["params"][0] = nn.Parameter(group["params"][0][mask].requires_grad_(True))
+                optimizable_tensors[name] = group["params"][0]
+        return optimizable_tensors
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         """Accumulate 2D position gradients for densification decisions."""
