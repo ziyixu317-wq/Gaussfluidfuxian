@@ -186,28 +186,23 @@ class Scene:
             colors_sample = img_np[px_y, px_x, :3]
 
             # Build camera-to-world transform
-            R_cam = cam_info.R.T  # R is stored transposed
-            T_cam = cam_info.T
-            c2w = np.eye(4)
-            c2w[:3, :3] = R_cam
-            c2w[:3, 3] = -R_cam @ T_cam
-
-            cam_center = c2w[:3, 3]
+            R_c2w = cam_info.R  # cam_info.R is w2c[:3, :3].T = R_c2w
+            cam_center = -R_c2w @ cam_info.T
 
             # Compute ray directions for sampled pixels
             h, w = img_np.shape[:2]
             focal = (w / 2) / np.tan(cam_info.FovX / 2)
 
-            # Normalized device coordinates
+            # Normalized device coordinates (COLMAP convention)
             ndc_x = (px_x - w / 2) / focal
-            ndc_y = -(px_y - h / 2) / focal  # flip y
-            ndc_z = -np.ones_like(ndc_x)
+            ndc_y = (px_y - h / 2) / focal
+            ndc_z = np.ones_like(ndc_x)
 
             dirs_cam = np.stack([ndc_x, ndc_y, ndc_z], axis=-1)
             dirs_cam = dirs_cam / np.linalg.norm(dirs_cam, axis=-1, keepdims=True)
 
             # Rotate to world
-            dirs_world = (R_cam @ dirs_cam.T).T
+            dirs_world = (R_c2w @ dirs_cam.T).T
 
             # Estimate depth range: camera distance to origin, fluid is near center.
             # Sample depths uniformly to fill a volume (not a shell).

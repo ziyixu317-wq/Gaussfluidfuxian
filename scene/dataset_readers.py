@@ -75,6 +75,9 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
         # Parse transform matrix (camera-to-world)
         c2w = np.array(frame["transform_matrix"])
 
+        # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+        c2w[:3, 1:3] *= -1
+
         # Convert from NeRF convention (camera-to-world) to 3DGS convention
         # In NeRF: c2w = [R | t] maps camera coords to world coords
         # In 3DGS: R = transpose of rotation, T is translation
