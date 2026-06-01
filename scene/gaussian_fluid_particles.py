@@ -136,22 +136,10 @@ class GaussianFluidParticles(nn.Module):
         features[:, :3, 0] = fused_color  # DC component
         features[:, :3, 1:] = 0.0  # Higher order (1st) initialized to 0
 
-        # Scale initialization: distance to nearest 3 neighbors (use simple heuristic)
-        # Since we don't use simple-knn (K=3 only), compute via pytorch3d
-        try:
-            from pytorch3d.ops import knn_points
-            pos_batch = fused_point_cloud.unsqueeze(0).unsqueeze(0)  # (1, 1, N, 3)
-            dists, _, _ = knn_points(
-                fused_point_cloud.unsqueeze(0).unsqueeze(0),
-                fused_point_cloud.unsqueeze(0).unsqueeze(0),
-                K=4, return_nn=False, return_sorted=True
-            )
-            dists = torch.sqrt(dists.squeeze()[:, 1:] + 1e-10)  # (N, 3), skip self
-            avg_dist = dists.mean(dim=-1)  # (N,)
-        except ImportError:
-            # Fallback: use a simple heuristic
-            avg_dist = torch.ones(fused_point_cloud.shape[0],
-                                  device="cuda") * spatial_lr_scale * 0.1
+        # Scale initialization: avg distance to 3 nearest neighbors
+        # Uses our multi-backend KNN (pytorch3d/faiss/torch.cdist)
+        from scene.density_optimization import knn_avg_neighbor_dist
+        avg_dist = knn_avg_neighbor_dist(fused_point_cloud, k=4)
 
         scales = torch.log(avg_dist.clamp(min=1e-7)).unsqueeze(-1).repeat(1, 3)
 

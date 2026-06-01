@@ -7,4 +7,5 @@ tqdm
 imageio
 opencv-python
 tensorboard
-pytorch3d
+# Optional (auto-detected): pytorch3d or faiss-gpu for faster KNN
+# If neither is available, falls back to pure PyTorch torch.cdist

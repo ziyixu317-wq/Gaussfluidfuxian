@@ -2,114 +2,147 @@
 # GaussFluids: Density Optimization & SPH Density Estimation
 # Paper Section 3.3, Equations (5)-(6)
 #
+# KNN backends (auto-select): pytorch3d > faiss > torch.cdist
+# torch.cdist is pure PyTorch — always works, zero extra deps.
+#
 
 import torch
 import math
 
 
 # ---------------------------------------------------------------------------
-# Poly6 SPH smoothing kernel
+# Multi-backend KNN
+# ---------------------------------------------------------------------------
+
+def _knn_faiss(query, ref, k):
+    """KNN via faiss-gpu."""
+    import numpy as np
+    import faiss
+
+    query_np = query.detach().cpu().numpy().astype(np.float32)
+    ref_np = ref.detach().cpu().numpy().astype(np.float32)
+
+    res = faiss.StandardGpuResources()
+    index_flat = faiss.IndexFlatL2(ref_np.shape[1])
+    gpu_index = faiss.index_cpu_to_gpu(res, 0, index_flat)
+    gpu_index.add(ref_np)
+
+    dists_np, idx_np = gpu_index.search(query_np, k)
+    dists = torch.tensor(dists_np, dtype=torch.float32, device=query.device)
+    idx = torch.tensor(idx_np, dtype=torch.long, device=query.device)
+    return dists, idx
+
+
+def _knn_torch_cdist(query, ref, k):
+    """
+    KNN via batched torch.cdist + topk.
+    Pure PyTorch — always available, zero dependencies.
+    """
+    N = query.shape[0]
+    chunk = 2048  # balance speed vs memory
+    all_dists, all_idx = [], []
+
+    for i in range(0, N, chunk):
+        c = query[i:i + chunk]
+        d = torch.cdist(c.unsqueeze(0), ref.unsqueeze(0)).squeeze(0)
+        top_d, top_i = torch.topk(d, k=k, dim=-1, largest=False)
+        all_dists.append(top_d)
+        all_idx.append(top_i)
+
+    return torch.cat(all_dists, 0), torch.cat(all_idx, 0)
+
+
+def knn_points(query, ref, k):
+    """
+    KNN with auto-backend: pytorch3d → faiss → torch.cdist.
+
+    Args:
+        query: (N_q, D) tensor
+        ref:   (N_r, D) tensor
+        k:     number of neighbors
+    Returns:
+        dists: (N_q, K) **squared** L2 distances
+        idx:   (N_q, K) neighbor indices
+    """
+    # 1) pytorch3d (fastest GPU-native)
+    try:
+        from pytorch3d.ops import knn_points as _knn
+        with torch.no_grad():
+            d, i, _ = _knn(query.unsqueeze(0), ref.unsqueeze(0), K=k,
+                           return_nn=False, return_sorted=True)
+        return d.squeeze(0), i.squeeze(0)
+    except ImportError:
+        pass
+
+    # 2) faiss
+    try:
+        return _knn_faiss(query, ref, k)
+    except (ImportError, AttributeError):
+        pass
+
+    # 3) pure PyTorch fallback (always works)
+    return _knn_torch_cdist(query, ref, k)
+
+
+# ---------------------------------------------------------------------------
+# Poly6 SPH smoothing kernel (Equation 6)
 # ---------------------------------------------------------------------------
 
 def poly6_kernel(r, h):
     """
-    Poly6 SPH smoothing kernel (Equation 6).
-    W(r, h) = (315 / (64π · h⁹)) · (h² − r²)³  if 0 ≤ r ≤ h, else 0
+    W(r, h) = (315 / (64π·h⁹)) · (h² − r²)³   if 0 ≤ r ≤ h, else 0
 
     Args:
-        r: (N, K) tensor of distances between particles and their K neighbors
-        h: smoothing length (scalar)
-    Returns:
-        (N, K) tensor of kernel weights
+        r: (N, K) Euclidean distances
+        h: smoothing length
     """
     h_sq = h * h
-    # Polynomial kernel coefficient: 315 / (64π · h⁹)
     coeff = 315.0 / (64.0 * math.pi * (h ** 9))
-
     mask = (r <= h).float()
-    kernel_vals = coeff * ((h_sq - r * r) ** 3) * mask
-    return kernel_vals
+    return coeff * ((h_sq - r * r) ** 3) * mask
 
 
 # ---------------------------------------------------------------------------
-# SPH density computation using pytorch3d KNN
+# SPH density (Equation 5)
 # ---------------------------------------------------------------------------
 
 def compute_sph_density(positions, h=0.3, k=64):
     """
-    Compute SPH density at each particle using KNN and Poly6 kernel.
-    Density at particle i: ρ_i = Σ_j W(‖p_i − p_j‖₂, h)
-
-    Uses pytorch3d.ops.knn_points for KNN search (K=64 per paper).
+    ρ_i = Σ_j W(‖p_i − p_j‖₂, h)
 
     Args:
-        positions: (N, 3) tensor — MUST be deformed positions p_t
-        h: smoothing length (default 0.3 per paper)
-        k: number of neighbors (default 64 per paper)
+        positions: (N, 3) — MUST be deformed positions p_t
+        h: smoothing length (paper: 0.3)
+        k: KNN K (paper: 64)
     Returns:
-        densities: (N,) tensor of ρ_i values
+        densities: (N,)
     """
-    try:
-        from pytorch3d.ops import knn_points
-    except ImportError:
-        raise ImportError(
-            "pytorch3d is required for KNN-based SPH density. "
-            "Install with: pip install pytorch3d"
-        )
-
     N = positions.shape[0]
-
-    # Handle small particle counts
     actual_k = min(k, N)
 
-    # pytorch3d KNN: returns (dists, idx, _)
-    # positions need shape (B, N, 3), so add batch dim
-    pos_batch = positions.unsqueeze(0)  # (1, N, 3)
-
-    with torch.no_grad():
-        dists, idx, _ = knn_points(
-            pos_batch, pos_batch,
-            K=actual_k,
-            return_nn=False,
-            return_sorted=True
-        )
-
-    dists = dists.squeeze(0)  # (N, K)
-    # dists are squared distances from pytorch3d knn_points
-    dists = torch.sqrt(dists + 1e-10)  # (N, K) — Euclidean distances
-
-    # Compute Poly6 kernel weights
+    sq_dists, _ = knn_points(positions, positions, actual_k)  # (N, K)
+    dists = torch.sqrt(sq_dists + 1e-10)
     weights = poly6_kernel(dists, h)  # (N, K)
-
-    # Density: sum of kernel weights over neighbors
-    densities = weights.sum(dim=-1)  # (N,)
-
-    return densities
+    return weights.sum(dim=-1)  # (N,)
 
 
 # ---------------------------------------------------------------------------
-# Density-guided adaptive control helpers
+# Scale initialization helper (replaces simple-knn with K=4)
 # ---------------------------------------------------------------------------
 
-def compute_density_gradient_mask(densities, low_percentile=0.05, high_percentile=0.95):
+def knn_avg_neighbor_dist(positions, k=4):
     """
-    Identify particles with extreme densities for adaptive control.
-    Low density → may need splitting (under-resolved region)
-    High density → may need pruning (over-resolved region)
+    Average distance to k-1 nearest neighbors (excluding self).
+    Used for Gaussian scale initialization, replacing simple-knn.
 
     Args:
-        densities: (N,) tensor
-        low_percentile: threshold for low density
-        high_percentile: threshold for high density
+        positions: (N, 3)
+        k: number of neighbors to query (default 4)
     Returns:
-        low_mask, high_mask: boolean tensors
+        avg_dist: (N,)
     """
-    sorted_dens, _ = torch.sort(densities)
-    N = densities.shape[0]
-    low_thresh = sorted_dens[int(N * low_percentile)]
-    high_thresh = sorted_dens[int(N * high_percentile)]
-
-    low_mask = densities < low_thresh
-    high_mask = densities > high_thresh
-
-    return low_mask, high_mask
+    N = positions.shape[0]
+    actual_k = min(k, N)
+    sq_dists, _ = knn_points(positions, positions, actual_k)
+    dists = torch.sqrt(sq_dists[:, 1:] + 1e-10)  # skip self
+    return dists.mean(dim=-1)
