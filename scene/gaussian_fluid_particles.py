@@ -386,51 +386,59 @@ class GaussianFluidParticles(nn.Module):
         self.denom = torch.zeros((self._xyz.shape[0], 1), device="cuda")
 
     def cat_tensors_to_optimizer(self, tensors_dict):
-        """Concatenate tensors and register them in the optimizer."""
+        """Concatenate tensors and register them in the optimizer.
+        Only touches groups whose names are in tensors_dict.
+        Skips groups like 'mlp' (encoder weights) that don't change during densification.
+        """
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
-            # Ensure all existing params are in optimizer before adding new ones
+            name = group["name"]
+            if name not in tensors_dict:
+                continue  # skip encoder/mlp params — they don't grow
+
             stored_state = self.optimizer.state.get(
                 group['params'][0], None
             )
             if stored_state is not None:
                 stored_state["exp_avg"] = torch.cat(
-                    (stored_state["exp_avg"], torch.zeros_like(tensors_dict[group["name"]])),
+                    (stored_state["exp_avg"], torch.zeros_like(tensors_dict[name])),
                     dim=0
                 )
                 stored_state["exp_avg_sq"] = torch.cat(
-                    (stored_state["exp_avg_sq"], torch.zeros_like(tensors_dict[group["name"]])),
+                    (stored_state["exp_avg_sq"], torch.zeros_like(tensors_dict[name])),
                     dim=0
                 )
                 del self.optimizer.state[group['params'][0]]
                 group["params"][0] = nn.Parameter(
                     torch.cat(
-                        (group["params"][0], tensors_dict[group["name"]]), dim=0
+                        (group["params"][0], tensors_dict[name]), dim=0
                     )
                 )
                 self.optimizer.state[group['params'][0]] = stored_state
-                optimizable_tensors[group["name"]] = group["params"][0]
+                optimizable_tensors[name] = group["params"][0]
             else:
                 group["params"][0] = nn.Parameter(
                     torch.cat(
-                        (group["params"][0], tensors_dict[group["name"]]), dim=0
+                        (group["params"][0], tensors_dict[name]), dim=0
                     )
                 )
-                optimizable_tensors[group["name"]] = group["params"][0]
+                optimizable_tensors[name] = group["params"][0]
         return optimizable_tensors
 
     def _optimizer_state_dict_with_transform_feature(self, mask, optimizer_state_dict):
-        """Prune optimizer state to match pruned tensors."""
+        """Prune optimizer state to match pruned tensors.
+        Only prunes per-particle groups; skips encoder/mlp params (fixed size).
+        """
         param_groups = optimizer_state_dict["param_groups"]
         param_state = optimizer_state_dict["state"]
+        mask_len = mask.shape[0]
 
         for group in param_groups:
             stored_state = param_state.get(id(group["params"][0]), None)
             if stored_state is not None:
                 for key in ["exp_avg", "exp_avg_sq"]:
-                    if key in stored_state:
+                    if key in stored_state and stored_state[key].shape[0] == mask_len:
                         stored_state[key] = stored_state[key][mask]
-                # Update the id mapping since we'll create new params
                 del param_state[id(group["params"][0])]
 
         return optimizer_state_dict
