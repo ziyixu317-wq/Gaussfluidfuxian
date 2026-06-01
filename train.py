@@ -279,8 +279,8 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
                 # Reset accumulated gradient stats
                 torch.cuda.empty_cache()
 
-            if iteration % opt.opacity_reset_interval == 0 or \
-               (dataset.white_background and iteration == opt.densify_from_iter):
+            if iteration > 0 and (iteration % opt.opacity_reset_interval == 0 or
+               (dataset.white_background and iteration == opt.densify_from_iter)):
                 gaussians.reset_opacity()
 
         # --------------------------------------------------------------
