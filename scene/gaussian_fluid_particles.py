@@ -198,16 +198,11 @@ class GaussianFluidParticles(nn.Module):
         # Scale: additive offset in log-space
         scales_final = self._scaling + delta_s
 
-        # Rotation: combine quaternions via multiplication
-        # Default to identity quaternion when delta_r ≈ 0 (MLP zero-init / frozen)
-        # normalize([0,0,0,0]) = NaN, so handle the zero case explicitly
-        delta_r_norm = torch.zeros_like(delta_r)
-        delta_r_norm[:, 0] = 1.0  # identity quaternion: [1, 0, 0, 0]
-        nonzero = delta_r.norm(dim=-1) > 1e-8
-        if nonzero.any():
-            delta_r_norm[nonzero] = torch.nn.functional.normalize(
-                delta_r[nonzero], dim=-1)
-        rotations_final = batch_quaternion_multiply(delta_r_norm, self._rotation)
+        # Rotation: output_head bias = [1,0,0,0] → zero-weight MLP outputs
+        # identity quaternion. DO NOT pre-normalize — batch_quaternion_multiply
+        # and renderer's rotation_activation handle it. Pre-normalizing kills
+        # gradient flow through the quaternion.
+        rotations_final = batch_quaternion_multiply(delta_r, self._rotation)
 
         # Opacity: no deformation (paper only deforms p, s, r)
         opacity_final = self._opacity

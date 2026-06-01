@@ -124,6 +124,12 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
     # Learning rate schedulers
     bg_color = scene.background
+    xyz_scheduler = get_expon_lr_func(
+        lr_init=opt.position_lr_init * gaussians.spatial_lr_scale,
+        lr_final=opt.position_lr_final * gaussians.spatial_lr_scale,
+        lr_delay_mult=opt.position_lr_delay_mult,
+        max_steps=opt.position_lr_max_steps,
+    )
 
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
@@ -132,6 +138,7 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
     progress_bar = tqdm(range(first_iter, opt.iterations + 1), desc="Training")
     first_iter += 1
     physics_losses = {}
+    prev_phase = None
 
     for iteration in progress_bar:
         iter_start.record()
@@ -148,19 +155,26 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         lambda_weights = get_dynamic_lambda_weights(iteration, opt, phase)
 
         # --------------------------------------------------------------
-        # Phase-specific (Sec 4.1.2):
+        # Phase transition (one-shot freeze/unfreeze)
+        # --------------------------------------------------------------
+        if phase != prev_phase:
+            print(f"\n[ITER {iteration}] Transition: {prev_phase} → {phase}")
+            if phase == "phase1":
+                gaussians.freeze_mlp()
+            elif phase == "phase2":
+                gaussians.unfreeze_mlp()
+            prev_phase = phase
+
+        # --------------------------------------------------------------
+        # Phase-specific sampling (Sec 4.1.2):
         #   Phase 1: canonical frame, t=0 ONLY, MLP FROZEN (3DGS procedure)
-        #   Phase 2: dynamics, all timesteps, MLP trainable
-        #   Phase 3: refinement, all timesteps, MLP trainable
+        #   Phase 2/3: dynamics/refinement, all timesteps, MLP trainable
         # --------------------------------------------------------------
         if phase == "phase1":
-            gaussians.freeze_mlp()
             if len(t0_cameras) == 0:
                 raise RuntimeError("No t=0 cameras available for Phase 1!")
             viewpoint_cam = t0_cameras[iteration % len(t0_cameras)]
         else:
-            if phase == "phase2":
-                gaussians.unfreeze_mlp()
             viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
 
         # --------------------------------------------------------------
@@ -292,6 +306,13 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
             if iteration > 0 and (iteration % opt.opacity_reset_interval == 0 or
                (dataset.white_background and iteration == opt.densify_from_iter)):
                 gaussians.reset_opacity()
+
+        # --------------------------------------------------------------
+        # Learning rate scheduling (standard 3DGS: exponential decay on xyz)
+        # --------------------------------------------------------------
+        for param_group in gaussians.optimizer.param_groups:
+            if param_group["name"] == "xyz":
+                param_group['lr'] = xyz_scheduler(iteration)
 
         # --------------------------------------------------------------
         # Optimizer step

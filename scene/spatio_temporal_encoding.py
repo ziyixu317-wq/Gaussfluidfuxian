@@ -46,9 +46,11 @@ class SpatioTemporalEncoder(nn.Module):
         # Output head: Δp (3) + Δs (3) + Δr (4) = 10
         self.output_head = nn.Linear(hidden_dim, output_dim)
 
-        # Initialize for identity mapping (all outputs near zero)
+        # Initialize for identity mapping:
+        # Δp=0, Δs=0, Δr=[1,0,0,0] (identity quaternion: no rotation)
         nn.init.zeros_(self.output_head.weight)
         nn.init.zeros_(self.output_head.bias)
+        self.output_head.bias.data[6:10] = torch.tensor([1.0, 0.0, 0.0, 0.0])
 
         # Small initialization for MLP layers
         for layer in self.mlp:
