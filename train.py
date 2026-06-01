@@ -195,7 +195,7 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         # --------------------------------------------------------------
         # Physics-based losses (on DEFORMED + ACTIVATED state)
         # --------------------------------------------------------------
-        if phase != "phase1" or iteration < 100:
+        if phase != "phase1":
             # Compute on deformed state from render_pkg
             physics_losses = gaussians.compute_physics_losses(
                 p_t=render_pkg["deformed_xyz"],
@@ -257,15 +257,18 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
             if iteration > opt.densify_from_iter and \
                iteration % opt.densification_interval == 0:
+                # Average gradient over accumulated steps
+                avg_grad = gaussians.xyz_gradient_accum / \
+                    gaussians.denom.clamp(min=1)
                 # Clone small Gaussians with high gradient
                 gaussians.densify_and_clone(
-                    gaussians.xyz_gradient_accum,
+                    avg_grad,
                     opt.densify_grad_threshold,
                     scene.cameras_extent,
                 )
                 # Split large Gaussians with high gradient
                 gaussians.densify_and_split(
-                    gaussians.xyz_gradient_accum,
+                    avg_grad,
                     opt.densify_grad_threshold,
                     scene.cameras_extent,
                 )
