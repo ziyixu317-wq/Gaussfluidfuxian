@@ -149,15 +149,20 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
         lambda_weights = get_dynamic_lambda_weights(iteration, opt, phase)
 
         # --------------------------------------------------------------
-        # Phase-specific sampling
-        # MLP is always trainable (like 4DGS deformation — never frozen).
-        # Phase 1 uses t=0 → MLP naturally learns identity (Δ≈0), smooth Phase 2 entry.
+        # Phase-specific sampling & MLP control
+        # Paper Sec 4.1.2: Phase 1 = canonical frame (3DGS procedure, no deformation)
+        # Phase 2 = dynamics (MLP unfrozen, all timesteps)
         # --------------------------------------------------------------
         if phase == "phase1":
+            # Phase 1: t=0 only, MLP frozen (paper: "follows official 3DGS procedure")
+            gaussians.freeze_mlp()
             if len(t0_cameras) == 0:
                 raise RuntimeError("No t=0 cameras available for Phase 1!")
             viewpoint_cam = t0_cameras[iteration % len(t0_cameras)]
         else:
+            # Phase 2/3: all timesteps, MLP trainable
+            if phase == "phase2":
+                gaussians.unfreeze_mlp()  # idempotent; paper: Phase 2 = dynamics
             viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
 
         # --------------------------------------------------------------
@@ -202,7 +207,8 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
         loss.backward()
 
-        # Gradient clipping: stabilise MLP + transform feature training
+        # Gradient clipping (engineering safety measure; not from paper).
+        # Prevents NaN when MLP unfreezes at Phase 2 start.
         torch.nn.utils.clip_grad_norm_(
             gaussians.spatio_temporal_encoder.parameters(),
             max_norm=1.0
