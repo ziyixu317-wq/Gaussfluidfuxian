@@ -168,6 +168,8 @@ class GaussianFluidParticles(nn.Module):
         self._transform_feature = nn.Parameter(transform_features.requires_grad_(True))
 
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
     # ------------------------------------------------------------------
     # Spatio-Temporal Deformation (Equation 4)
@@ -609,6 +611,8 @@ class GaussianFluidParticles(nn.Module):
             .requires_grad_(True)
         )
         self.max_radii2D = torch.zeros((self._xyz.shape[0]), device="cuda")
+        self.xyz_gradient_accum = torch.zeros((self._xyz.shape[0], 1), device="cuda")
+        self.denom = torch.zeros((self._xyz.shape[0], 1), device="cuda")
 
     def save_deformation(self, path):
         """Save spatio-temporal encoder weights."""
