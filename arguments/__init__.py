@@ -82,9 +82,9 @@ class OptimizationParams:
     def __init__(self):
         # Iteration counts for 3 phases
         self.iterations = 14000              # Total iterations
-        self.phase1_iterations = 2000        # Canonical frame phase
-        self.phase2_start = 2000             # Dynamics phase starts
-        self.phase3_start = 8000             # Refinement phase starts
+        self.phase1_iterations = 4000        # Canonical frame phase (longer for random init)
+        self.phase2_start = 4000             # Dynamics phase starts
+        self.phase3_start = 10000            # Refinement phase starts
 
         # Loss weights (Paper Table 1, CORRECTED)
         self.lambda_rgb = 0.2       # L1 visual loss
@@ -122,9 +122,9 @@ class OptimizationParams:
 
     def add_arguments(self, parser):
         parser.add_argument('--iterations', type=int, default=14000)
-        parser.add_argument('--phase1_iterations', type=int, default=2000)
-        parser.add_argument('--phase2_start', type=int, default=2000)
-        parser.add_argument('--phase3_start', type=int, default=8000)
+        parser.add_argument('--phase1_iterations', type=int, default=4000)
+        parser.add_argument('--phase2_start', type=int, default=4000)
+        parser.add_argument('--phase3_start', type=int, default=10000)
 
         # Loss weights
         parser.add_argument('--lambda_rgb', type=float, default=0.2)

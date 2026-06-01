@@ -130,8 +130,10 @@ class Scene:
                 break
 
         if pcd is None:
-            # Random initialization within scene bounds
-            # Use camera centers to estimate bounds
+            # Random initialization: estimate scene center from camera positions,
+            # then place particles in a tight Gaussian around center.
+            # Paper uses COLMAP init; without it we need dense particles in
+            # the expected fluid region for convergence.
             print("No COLMAP point cloud found, initializing random point cloud...")
             cam_positions = []
             for cam_info in cam_infos[:min(50, len(cam_infos))]:
@@ -145,9 +147,10 @@ class Scene:
             center = cam_positions.mean(axis=0)
             extent = np.linalg.norm(cam_positions.max(axis=0) - cam_positions.min(axis=0))
 
-            num_pts = 30000
-            # Use tighter bounds for better convergence with random init
-            points = center + (np.random.randn(num_pts, 3)) * extent * 0.15
+            # Dense particles in tight central region (fluid is near center)
+            num_pts = 50000
+            radius = extent * 0.03  # ~0.65 units for extent=21.7
+            points = center + (np.random.randn(num_pts, 3)) * radius
             # Initialize colors based on camera view colors
             colors = np.ones_like(points) * 0.5  # neutral gray
             normals = np.zeros_like(points)
