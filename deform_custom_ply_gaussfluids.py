@@ -42,7 +42,7 @@ def load_custom_ply(ply_path, gaussians, canon_xyz, canon_scaling,
 
     if has_orig_idx:
         print("Found original_index column, using index-based mapping...")
-        orig_indices = np.asarray(vertex['original_index'])
+        orig_indices = np.asarray(vertex['original_index'], dtype=int)
 
         edited_xyz = np.stack([
             np.asarray(vertex['x']),
