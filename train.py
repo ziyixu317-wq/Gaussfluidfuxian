@@ -150,25 +150,14 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
         # --------------------------------------------------------------
         # Phase-specific sampling
+        # MLP is always trainable (like 4DGS deformation — never frozen).
+        # Phase 1 uses t=0 → MLP naturally learns identity (Δ≈0), smooth Phase 2 entry.
         # --------------------------------------------------------------
         if phase == "phase1":
-            # Phase 1: only sample t=0 frames, MLP frozen
-            if not gaussians.spatio_temporal_encoder.mlp[0].weight.requires_grad:
-                pass  # already frozen
-            else:
-                gaussians.freeze_mlp()
-
-            # Sample from t=0 cameras
             if len(t0_cameras) == 0:
                 raise RuntimeError("No t=0 cameras available for Phase 1!")
-
             viewpoint_cam = t0_cameras[iteration % len(t0_cameras)]
         else:
-            # Phase 2/3: all timesteps, MLP unfrozen
-            if phase == "phase2":
-                gaussians.unfreeze_mlp()
-
-            # Random camera from all training views
             viewpoint_cam = train_cameras[random.randint(0, len(train_cameras) - 1)]
 
         # --------------------------------------------------------------
@@ -197,32 +186,31 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
 
         # --------------------------------------------------------------
         # Physics-based losses (on DEFORMED + ACTIVATED state)
+        # Weights (λ) control per-phase magnitude, so always compute.
+        # Density (KNN) is strided internally for performance.
         # --------------------------------------------------------------
-        if phase != "phase1":
-            # Compute on deformed state from render_pkg
-            physics_losses = gaussians.compute_physics_losses(
-                p_t=render_pkg["deformed_xyz"],
-                scales_activated=render_pkg["scales_activated"],
-                opacities_activated=render_pkg["opacities_activated"],
-                shs=render_pkg["shs"],
-                iteration=iteration,
-                lambda_weights=lambda_weights,
-            )
-            for loss_name, loss_val in physics_losses.items():
-                loss += loss_val
+        physics_losses = gaussians.compute_physics_losses(
+            p_t=render_pkg["deformed_xyz"],
+            scales_activated=render_pkg["scales_activated"],
+            opacities_activated=render_pkg["opacities_activated"],
+            shs=render_pkg["shs"],
+            iteration=iteration,
+            lambda_weights=lambda_weights,
+        )
+        for loss_name, loss_val in physics_losses.items():
+            loss += loss_val
 
         loss.backward()
 
-        # Gradient clipping: prevent MLP explosion when entering Phase 2
-        if phase != "phase1":
-            torch.nn.utils.clip_grad_norm_(
-                gaussians.spatio_temporal_encoder.parameters(),
-                max_norm=1.0
-            )
-            torch.nn.utils.clip_grad_norm_(
-                [gaussians._transform_feature],
-                max_norm=1.0
-            )
+        # Gradient clipping: stabilise MLP + transform feature training
+        torch.nn.utils.clip_grad_norm_(
+            gaussians.spatio_temporal_encoder.parameters(),
+            max_norm=1.0
+        )
+        torch.nn.utils.clip_grad_norm_(
+            [gaussians._transform_feature],
+            max_norm=1.0
+        )
 
         iter_end.record()
 
@@ -248,10 +236,9 @@ def training(dataset, opt, pipe, gaussfluids_params, testing_iterations,
                                      0 if phase == "phase1" else (1 if phase == "phase2" else 2),
                                      iteration)
 
-                # Log physics losses if computed
-                if phase != "phase1":
-                    for loss_name, loss_val in physics_losses.items():
-                        tb_writer.add_scalar(f'train/{loss_name}', loss_val.item(), iteration)
+                # Log physics losses
+                for loss_name, loss_val in physics_losses.items():
+                    tb_writer.add_scalar(f'train/{loss_name}', loss_val.item(), iteration)
 
                 # PSNR
                 with torch.no_grad():
