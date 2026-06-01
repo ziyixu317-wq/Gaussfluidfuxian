@@ -37,19 +37,22 @@ def _knn_torch_cdist(query, ref, k):
     """
     KNN via batched torch.cdist + topk.
     Pure PyTorch — always available, zero dependencies.
+    Wrapped in torch.no_grad() to prevent memory explosion from autograd.
     """
-    N = query.shape[0]
-    chunk = 2048  # balance speed vs memory
-    all_dists, all_idx = [], []
+    with torch.no_grad():
+        N = query.shape[0]
+        # Adaptive chunk size to avoid OOM
+        chunk = min(2048, max(128, 2_000_000 // max(N, 1)))
+        all_dists, all_idx = [], []
 
-    for i in range(0, N, chunk):
-        c = query[i:i + chunk]
-        d = torch.cdist(c.unsqueeze(0), ref.unsqueeze(0)).squeeze(0)
-        top_d, top_i = torch.topk(d, k=k, dim=-1, largest=False)
-        all_dists.append(top_d)
-        all_idx.append(top_i)
+        for i in range(0, N, chunk):
+            c = query[i:i + chunk]
+            d = torch.cdist(c.unsqueeze(0), ref.unsqueeze(0)).squeeze(0)
+            top_d, top_i = torch.topk(d, k=k, dim=-1, largest=False)
+            all_dists.append(top_d)
+            all_idx.append(top_i)
 
-    return torch.cat(all_dists, 0), torch.cat(all_idx, 0)
+        return torch.cat(all_dists, 0), torch.cat(all_idx, 0)
 
 
 def knn_points(query, ref, k):
@@ -142,6 +145,8 @@ def knn_avg_neighbor_dist(positions, k=4):
         avg_dist: (N,)
     """
     N = positions.shape[0]
+    if N < 2:
+        return torch.ones(N, device=positions.device) * 0.1
     actual_k = min(k, N)
     sq_dists, _ = knn_points(positions, positions, actual_k)
     dists = torch.sqrt(sq_dists[:, 1:] + 1e-10)  # skip self

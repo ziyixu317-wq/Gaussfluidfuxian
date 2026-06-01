@@ -90,7 +90,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        image_tensor = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        image_tensor = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
         # Resize if needed (ensure dimensions match across dataset)
         width, height = image_tensor.size
