@@ -163,10 +163,9 @@ if __name__ == "__main__":
     pp.add_arguments(parser)
     gp.add_arguments(parser)
 
-    parser.add_argument('--load_iteration', type=int, required=True,
-                      help='Checkpoint iteration to load')
-
-    args = parser.parse_args(sys.argv[1:])
+    args, _ = parser.parse_known_args(sys.argv[1:])
+    if getattr(args, 'load_iteration', None) is None:
+        raise ValueError("Must specify --load_iteration for export!")
 
     # Assign args
     for attr in ['sh_degree', 'source_path', 'model_path', 'white_background',

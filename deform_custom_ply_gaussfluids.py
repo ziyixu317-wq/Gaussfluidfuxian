@@ -244,14 +244,14 @@ if __name__ == "__main__":
     pp.add_arguments(parser)
     gp.add_arguments(parser)
 
-    parser.add_argument('--load_iteration', type=int, required=True,
-                      help='Checkpoint iteration to load')
     parser.add_argument('--custom_ply', type=str, required=True,
                       help='Path to manually-edited PLY file')
     parser.add_argument('--save_ply', action='store_true', default=False,
                       help='Save deformed PLY at each timestep')
 
-    args = parser.parse_args(sys.argv[1:])
+    args, _ = parser.parse_known_args(sys.argv[1:])
+    if getattr(args, 'load_iteration', None) is None:
+        raise ValueError("Must specify --load_iteration for deformation!")
 
     # Assign args
     for attr in ['sh_degree', 'source_path', 'model_path', 'white_background',
